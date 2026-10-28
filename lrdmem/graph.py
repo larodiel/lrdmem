@@ -73,6 +73,19 @@ class Graph:
         """Slugs linked to or from the memory, superseding/superseded by it, or sharing a context."""
         return sorted({s for _, s in self._edges.get(self._key(slug, env), set())})
 
+    def edges(self) -> list[tuple[Memory | Context, Memory, str]]:
+        """Directed (source, target, rel) triples; rel is context, link or supersedes."""
+        out: list[tuple[Memory | Context, Memory, str]] = []
+        for m in self._nodes.values():
+            for rel, slugs in (("link", m.links), ("supersedes", m.supersedes)):
+                for slug in slugs:
+                    key = self._target(m.env, slug)
+                    if key and key != (m.env, m.slug):
+                        out.append((m, self._nodes[key], rel))
+        for key, ctxs in self._contexts.items():
+            out += [(c, self._nodes[key], "context") for c in ctxs]
+        return out
+
     def find(self, term: str, env: str | None = None) -> list[Memory | Context]:
         """Memories then contexts whose slug, description or body contains term (case-insensitive)."""
         t = term.lower()

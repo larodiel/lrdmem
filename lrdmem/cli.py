@@ -1,14 +1,17 @@
 """Command line entry point."""
 
 import argparse
+import json
 import subprocess
 import sys
 from pathlib import Path
 
 from lrdmem import __version__
+from lrdmem.export import to_dot, to_html, to_json
 from lrdmem.graph import AmbiguousSlug, Graph
 from lrdmem.lint import lint, printable
 from lrdmem.session import Session
+from lrdmem.stale import stale
 from lrdmem.store import AmbiguousRepo, Context, Memory, Store, resolve, store_root
 from lrdmem.triggers import render, select
 
@@ -96,6 +99,31 @@ def _repo_relative(file: str | None) -> str | None:
         return file
 
 
+def _git_root() -> Path | None:
+    try:
+        top = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=Path.cwd(), capture_output=True,
+                             text=True, check=True).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return Path(top) if top else None
+
+
+def _stale(store: Store, g: Graph, args) -> int:
+    found = stale(store, _git_root())
+    for m, path in found:
+        _out(f"{_rel(store, m)}: {path}")
+    return 1 if found else 0
+
+
+def _graph(store: Store, g: Graph, args) -> int:
+    text = {"html": to_html, "dot": to_dot, "json": lambda g: json.dumps(to_json(g), indent=2)}[args.format](g)
+    if args.output:
+        Path(args.output).write_text(text, encoding="utf-8")
+    else:
+        _out(text)
+    return 0
+
+
 def _for(store: Store, g: Graph, args) -> int:
     try:
         scope = resolve(store, Path.cwd(), args.env)
@@ -131,6 +159,12 @@ def main(argv: list[str] | None = None) -> int:
         else:
             p.add_argument("slug")
             p.add_argument("--env")
+    p = sub.add_parser("stale", help="list memories citing paths that no longer exist")
+    p.set_defaults(fn=_stale)
+    p = sub.add_parser("graph", help="export the memory graph")
+    p.set_defaults(fn=_graph)
+    p.add_argument("--format", choices=["html", "json", "dot"], default="html")
+    p.add_argument("-o", "--output")
     p = sub.add_parser("for", help="print memories triggered by a file or command")
     p.set_defaults(fn=_for)
     p.add_argument("file", nargs="?")
