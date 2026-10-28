@@ -245,7 +245,7 @@ def _sync(store: Store, g: Graph, args) -> int:
     results = sync(store, args.env)
     for r in results:
         if r.error:
-            _out(f"{r.env}: error: {r.error}")
+            _out(f"{r.env}: {'committed, ' if r.committed else ''}error: {r.error}")
         else:
             _out(f"{r.env}: {'committed' if r.committed else 'nothing to commit'}, "
                  f"{'pushed' if r.pushed else 'not pushed (no remote)'}")

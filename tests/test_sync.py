@@ -127,6 +127,122 @@ class SyncTest(unittest.TestCase):
         self.assertIsNotNone(pull(a, "work"))
         self.assertIsNotNone(sync(a)[0].error)
 
+    def conflicted_clones(self):
+        """Clones a and b where a already pushed an edit of f.md that b has not pulled."""
+        a = self.clone("a")
+        write(a.root / "work" / "f.md", "base\n")
+        sync(a)
+        b = self.clone("b")
+        write(a.root / "work" / "f.md", "from a\n")
+        sync(a)
+        return a, b
+
+    def test_hook_pull_skips_dirty_tree_without_stash(self):
+        a, b = self.conflicted_clones()
+        f = b.root / "work" / "f.md"
+        write(f, "local edit\n")
+        err = pull(b, "work")
+        self.assertIn("skipped: uncommitted changes", err)
+        self.assertEqual(f.read_text(), "local edit\n")
+        self.assertEqual(g(b.root / "work", "stash", "list"), "")
+        self.assertEqual(g(b.root / "work", "ls-files", "-u"), "")
+
+    def test_sync_refuses_unmerged_paths(self):
+        a, b = self.conflicted_clones()
+        repo = b.root / "work"
+        write(repo / "f.md", "from b\n")
+        g(repo, "commit", "-qam", "b edit")
+        g(repo, "fetch", "-q")
+        subprocess.run(["git", "merge", "origin/main"], cwd=repo, capture_output=True)
+        self.assertNotEqual(g(repo, "ls-files", "-u"), "")
+        head = g(repo, "rev-parse", "HEAD")
+        [res] = sync(b)
+        self.assertIn("unmerged", res.error)
+        self.assertFalse(res.pushed)
+        self.assertEqual(g(repo, "rev-parse", "HEAD"), head)
+        self.assertEqual(g(self.remote, "show", "main:f.md"), "from a\n")
+
+    def test_existing_rebase_is_not_aborted(self):
+        a, b = self.conflicted_clones()
+        repo = b.root / "work"
+        write(repo / "f.md", "from b\n")
+        g(repo, "commit", "-qam", "b edit")
+        subprocess.run(["git", "pull", "--rebase"], cwd=repo, capture_output=True)
+        in_rebase = (repo / g(repo, "rev-parse", "--git-path", "rebase-merge").strip()).exists()
+        self.assertTrue(in_rebase)
+        self.assertIn("rebase in progress", sync(b)[0].error)
+        self.assertIn("rebase in progress", pull(b, "work"))
+        self.assertTrue((repo / g(repo, "rev-parse", "--git-path", "rebase-merge").strip()).exists())
+
+    def test_git_never_prompts(self):
+        a = self.clone("a")
+        calls = []
+        real = subprocess.run
+        def spy(*args, **kw):
+            calls.append(kw)
+            return real(*args, **kw)
+        with mock.patch("lrdmem.sync.subprocess.run", spy):
+            sync(a)
+        self.assertTrue(calls)
+        for kw in calls:
+            self.assertEqual(kw["stdin"], subprocess.DEVNULL)
+            self.assertEqual(kw["env"]["GIT_TERMINAL_PROMPT"], "0")
+            self.assertIn("BatchMode=yes", kw["env"]["GIT_SSH_COMMAND"])
+
+    def test_exclude_is_literal_and_nested_repo_not_gitlink(self):
+        root = self.tmp / "s"
+        write(root / "ab" / "x.md", "x")
+        write(root / "a*" / "y.md", "y")
+        g(root, "init", "-q")
+        g(root, "init", "-q", "a*")
+        res = {r.env: r for r in sync(Store(root))}
+        self.assertTrue(res["_global"].committed and res["a*"].committed)
+        files = g(root, "ls-files", "-s")
+        self.assertIn("ab/x.md", files)
+        self.assertNotIn("160000", files)
+
+    def test_plain_envs_in_root_repo_are_one_result(self):
+        root = self.tmp / "s"
+        write(root / "e1" / "x.md", "x")
+        write(root / "e2" / "y.md", "y")
+        g(root, "init", "-q")
+        self.assertEqual([r.env for r in sync(Store(root))], ["_global"])
+
+    def test_env_arg_in_root_repo_stages_only_that_env(self):
+        root = self.tmp / "s"
+        write(root / "e1" / "x.md", "x")
+        write(root / "e2" / "y.md", "y")
+        g(root, "init", "-q")
+        self.assertEqual(sync(Store(root), "e1"), [SyncResult("e1", True, False, None)])
+        self.assertEqual(g(root, "ls-files").split(), ["e1/x.md"])
+
+    def test_first_push_sets_upstream(self):
+        a = self.clone("a")
+        write(a.root / "work" / "x.md", "x")
+        self.assertTrue(sync(a)[0].pushed)
+        self.assertEqual(g(a.root / "work", "rev-parse", "--abbrev-ref", "@{u}").strip(), "origin/main")
+        self.assertIn("x.md", g(self.remote, "ls-tree", "--name-only", "main"))
+
+    def test_timeout_returns_error(self):
+        a = self.clone("a")
+        write(a.root / "work" / "x.md", "x")
+        sync(a)
+        with mock.patch("lrdmem.sync.PULL_TIMEOUT", 0.001):
+            self.assertIn("timed out", pull(a, "work"))
+            [res] = sync(a)
+        self.assertIn("timed out", res.error)
+        self.assertFalse(res.pushed)
+
+    def test_cli_says_committed_when_error_follows(self):
+        a = self.clone("a")
+        sync(a)
+        g(a.root / "work", "remote", "set-url", "origin", str(self.tmp / "missing.git"))
+        write(a.root / "work" / "x.md", "x")
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {"LRDMEM_STORE": str(a.root)}), redirect_stdout(out):
+            self.assertEqual(main(["sync", "work"]), 1)
+        self.assertTrue(out.getvalue().startswith("work: committed, error: "))
+
     def test_autopush_enabled(self):
         self.assertFalse(autopush_enabled({"autopush": {}}, "work"))
         self.assertTrue(autopush_enabled({"autopush": {"*": True}}, "work"))
