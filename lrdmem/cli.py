@@ -4,7 +4,7 @@ import argparse
 import sys
 
 from lrdmem import __version__
-from lrdmem.lint import lint
+from lrdmem.lint import lint, printable
 from lrdmem.store import Store, store_root
 
 
@@ -18,7 +18,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "lint":
         problems = lint(Store(store_root()), args.env)
         for line in problems:
-            print(line)
+            print(printable(line))
         print(f"{len(problems)} problem(s)" if problems else "ok", file=sys.stderr)
         return 1 if problems else 0
     return 0

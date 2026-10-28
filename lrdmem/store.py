@@ -8,7 +8,7 @@ from pathlib import Path
 
 from lrdmem.frontmatter import split
 
-_IGNORED = {"MEMORY.md", "README.md"}
+IGNORED = {"MEMORY.md", "README.md"}
 _KIND = {"user": "fact", "reference": "fact", "feedback": "pattern", "project": "pattern"}
 _LINK = re.compile(r"\[\[([^\]]+)\]\]")
 
@@ -139,7 +139,8 @@ class Store:
                 )
         return out
 
-    def _scoped(self, folder: Path) -> tuple[str | None, str | None]:
+    def scope_of(self, folder: Path) -> tuple[str | None, str | None]:
+        """(env, repo) a folder belongs to; None for the scopes that do not name them."""
         rel = folder.relative_to(self.root).parts
         if rel[0] == "_global":
             return None, None
@@ -149,9 +150,9 @@ class Store:
         """All memories across every folder."""
         out = []
         for folder in self.folders():
-            env, repo = self._scoped(folder)
+            env, repo = self.scope_of(folder)
             for p in sorted(folder.glob("*.md")):
-                if p.name not in _IGNORED:
+                if p.name not in IGNORED:
                     read = _read(p)
                     if read:
                         out.append(Memory(p.stem, p, env, repo, *read))
@@ -161,7 +162,7 @@ class Store:
         """All contexts, from any folder's contexts/ subfolder."""
         out = []
         for folder in self.folders():
-            env, repo = self._scoped(folder)
+            env, repo = self.scope_of(folder)
             for p in sorted((folder / "contexts").glob("*.md")):
                 read = _read(p)
                 if read:

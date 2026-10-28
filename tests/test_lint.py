@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest import mock
 
 from lrdmem.cli import main
-from lrdmem.lint import has_secret, lint
+from lrdmem.lint import has_secret, lint, printable
 from lrdmem.store import Store
 from tests.fixtures import make_store
 
@@ -55,8 +55,40 @@ class LintTest(unittest.TestCase):
         del files["work/app/MEMORY.md"]
         self.has(files, "missing MEMORY.md")
 
-    def test_contexts_need_no_index_entry(self):
-        self.assertEqual(self.run_lint(clean()), [])
+    def test_link_to_other_repo_same_env_resolves(self):
+        files = clean(**{"work/other/MEMORY.md": index("o"), "work/other/o.md": mem("o"),
+                         "work/app/a.md": mem(body="**Why:** w\n**How to apply:** h [[o]]\n")})
+        self.assertEqual(self.run_lint(files), [])
+
+    def test_nothing_checked_is_a_problem(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = make_store(Path(t), clean())
+            self.assertEqual(lint(Store(root), "ghost"), ["ghost: no such environment"])
+            self.assertEqual(lint(Store(Path(t) / "nope")), [f"{Path(t) / 'nope'}: store not found"])
+
+    def test_vanishing_file_is_a_problem(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = make_store(Path(t), clean())
+            real = Path.read_text
+            def flaky(self, *a, **k):
+                if self.name == "a.md":
+                    raise FileNotFoundError(self)
+                return real(self, *a, **k)
+            with mock.patch.object(Path, "read_text", flaky):
+                out = lint(Store(root))
+        self.assertTrue(any("a.md: unreadable" in p for p in out), out)
+
+    def test_printable(self):
+        self.assertEqual(printable("a\x1b[31m\x7f\x85b\té"), "a?[31m??b?é")
+
+    def test_cli_strips_escapes(self):
+        files = clean(**{"work/app/a.md": mem(body="**Why:** w\n**How to apply:** [[\x1b]0;x]]\n")})
+        with tempfile.TemporaryDirectory() as t:
+            root = make_store(Path(t), files)
+            out = io.StringIO()
+            with mock.patch.dict(os.environ, {"LRDMEM_STORE": str(root)}), redirect_stdout(out), redirect_stderr(io.StringIO()):
+                main(["lint"])
+        self.assertNotIn("\x1b", out.getvalue())
 
     def test_memory_fields(self):
         self.has(clean(**{"work/app/a.md": mem("zz")}), "name is not 'a'")

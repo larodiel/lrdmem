@@ -6,7 +6,7 @@ from datetime import date
 from pathlib import Path
 
 from lrdmem.frontmatter import split
-from lrdmem.store import _IGNORED, Context, Memory, Store
+from lrdmem.store import IGNORED, Context, Memory, Store
 
 TYPES = {"user", "feedback", "project", "reference"}
 KINDS = {"obligation", "pattern", "fact"}
@@ -20,6 +20,11 @@ SECRET = re.compile(
     r"|(?i:password|passwd|api[_-]?key|secret|token)\s*[:=]\s*['\"]?[^\s'\"`<]{6,}"
 )
 ABS_PATH = re.compile(r"`((?:/Volumes|/Users|~)/[^`\s<>*]+)`")
+
+
+def printable(text: str) -> str:
+    """Replace control characters (C0, DEL, C1) with '?' so file-derived text cannot inject terminal escapes."""
+    return "".join("?" if ord(c) < 0x20 or 0x7F <= ord(c) <= 0x9F else c for c in text)
 
 
 def has_secret(text: str) -> bool:
@@ -110,20 +115,25 @@ def lint(store: Store, env: str | None = None) -> list[str]:
     # Walk files ourselves: Store skips unreadable and frontmatter-less files, lint must report them.
     stems: dict[str | None, set[str]] = {}
     for folder in store.folders():
-        e = store._scoped(folder)[0]
-        stems.setdefault(e, set()).update(p.stem for p in folder.glob("*.md") if p.name not in _IGNORED)
+        e = store.scope_of(folder)[0]
+        stems.setdefault(e, set()).update(p.stem for p in folder.glob("*.md") if p.name not in IGNORED)
+    if not store.root.is_dir():
+        return [f"{store.root}: store not found"]
+    if env and env not in store.environments():
+        return [f"{env}: no such environment"]
     problems = []
     for folder in store.folders(env):
-        e, repo = store._scoped(folder)
+        e, repo = store.scope_of(folder)
         known = stems.get(e, set()) | stems.get(None, set())
-        files = {p.name for p in folder.glob("*.md")} - _IGNORED
+        files = {p.name for p in folder.glob("*.md")} - IGNORED
         problems += _index(store, folder, files)
         jobs = [(folder / n, Memory, _memory) for n in sorted(files)]
         jobs += [(p, Context, _context) for p in sorted((folder / "contexts").glob("*.md"))]
         for path, cls, check in jobs:
             where = path.relative_to(store.root)
             try:
-                data, body = split(path.read_text(encoding="utf-8"))
+                text = path.read_text(encoding="utf-8")
+                data, body = split(text)
             except (OSError, ValueError) as err:
                 problems.append(f"{where}: unreadable ({err.__class__.__name__})")
                 continue
@@ -131,6 +141,5 @@ def lint(store: Store, env: str | None = None) -> list[str]:
                 problems.append(f"{where}: no frontmatter")
                 continue
             item = cls(path.stem, path, e, repo, data, body)
-            text = path.read_text(encoding="utf-8")
             problems += [f"{where}: {msg}" for msg in check(item, text, known)]
     return problems
