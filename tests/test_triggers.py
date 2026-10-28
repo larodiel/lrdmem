@@ -25,6 +25,20 @@ class TriggersTest(unittest.TestCase):
         self._t = tempfile.TemporaryDirectory()
         self.tmp = Path(self._t.name)
         self.addCleanup(self._t.cleanup)
+        # hermetic session state: private TMPDIR per test
+        state = Path(tempfile.mkdtemp(dir=self._t.name))
+        old = os.environ.get("TMPDIR")
+        os.environ["TMPDIR"] = str(state)
+        tempfile.tempdir = None
+        self.addCleanup(self._restore_tmp, old)
+
+    @staticmethod
+    def _restore_tmp(old):
+        if old is None:
+            del os.environ["TMPDIR"]
+        else:
+            os.environ["TMPDIR"] = old
+        tempfile.tempdir = None
 
     def mem(self, files, slug="m", env="work"):
         store = Store(make_store(self.tmp, files))
@@ -154,7 +168,6 @@ class TriggersTest(unittest.TestCase):
                 del os.environ["LRDMEM_STORE"]
             else:
                 os.environ["LRDMEM_STORE"] = old[1]
-            (Path(tempfile.gettempdir()) / "lrdmem" / "t5.json").unlink(missing_ok=True)
 
 
 if __name__ == "__main__":
