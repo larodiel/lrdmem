@@ -198,7 +198,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--source", choices=["chat", "pr"], default="chat")
     p.add_argument("--files", nargs="*", default=[])
     p.add_argument("--pr")
-    p.add_argument("--kind")
+    p.add_argument("--kind", choices=["obligation", "pattern", "fact"])
     p.add_argument("--description")
     p.add_argument("--body")
     p.add_argument("--env")

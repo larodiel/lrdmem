@@ -1,6 +1,7 @@
 """Record a correction: a context (the incident) linked to a memory (the rule)."""
 
 import fcntl
+import os
 import re
 from dataclasses import dataclass, field
 from datetime import date
@@ -14,6 +15,7 @@ _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 _LINK = re.compile(r"\[\[([^\]]+)\]\]")
 _STOP = {"this", "that", "with", "from", "have", "when", "your", "what", "does", "into", "should", "never",
          "always", "using", "used", "about", "there", "their", "which", "would", "could", "than", "then"}
+_RESERVED = {"memory", "readme", "contexts"}
 _SCOPES = ("repo", "env", "global")
 
 
@@ -43,6 +45,8 @@ def _folder(store: Store, cwd: Path, scope: str, env: str | None) -> tuple[Path,
     """The target folder and the env it is visible from."""
     if scope == "global":
         return store.root / "_global", None
+    if env is not None and env not in store.environments():
+        raise LearnRefused(f"unknown environment '{env}'")
     try:
         found = resolve(store, cwd, env)
     except AmbiguousRepo as e:
@@ -50,7 +54,10 @@ def _folder(store: Store, cwd: Path, scope: str, env: str | None) -> tuple[Path,
     if not found:
         raise LearnRefused("this repository is not opted in to the store; use scope global or create its folder")
     e, repo = found
-    return store.root / e / ("_global" if scope == "env" else repo), e
+    folder = store.root / e / ("_global" if scope == "env" else repo)
+    if not folder.resolve().is_relative_to((store.root / e).resolve()):  # env dirs may be symlinks; folders may not leave them
+        raise LearnRefused("target folder resolves outside its environment")
+    return folder, e
 
 
 def _check_text(store: Store, fields: dict[str, str], scope: str, env: str | None, slug: str) -> None:
@@ -75,7 +82,8 @@ def _duplicates(store: Store, env: str | None, slug: str, description: str) -> l
 
 def _create(path: Path, text: str) -> bool:
     try:
-        with open(path, "x", encoding="utf-8") as f:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
     except FileExistsError:
         return False
@@ -94,7 +102,8 @@ def _touch(path: Path, today: str) -> None:
 
 
 def _index(folder: Path, line: str) -> None:
-    with open(folder / "MEMORY.md", "a+", encoding="utf-8") as f:
+    fd = os.open(folder / "MEMORY.md", os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o644)
+    with os.fdopen(fd, "a+", encoding="utf-8") as f:
         fcntl.flock(f, fcntl.LOCK_EX)
         f.seek(0)
         text = f.read()
@@ -107,8 +116,8 @@ def learn(store: Store, cwd: Path, *, memory: str, mistake: str, correction: str
           description: str | None = None, body: str | None = None, env: str | None = None,
           new: bool = False, device: str = "") -> LearnResult:
     """Write a context for `memory`, creating the memory when absent; raise LearnRefused on invalid input."""
-    if not _SLUG.match(memory):
-        raise LearnRefused("memory slug must match ^[a-z0-9][a-z0-9-]{0,63}$")
+    if not _SLUG.match(memory) or memory in _RESERVED:
+        raise LearnRefused("memory slug must match ^[a-z0-9][a-z0-9-]{0,63}$ and not be memory, readme or contexts")
     if scope not in _SCOPES:
         raise LearnRefused(f"scope must be one of {list(_SCOPES)}")
     if source not in SOURCES:
@@ -123,11 +132,18 @@ def learn(store: Store, cwd: Path, *, memory: str, mistake: str, correction: str
         raise LearnRefused("agent, device, pr, description and files must be single-line")
     folder, vis_env = _folder(store, cwd, scope, env)
     path = folder / f"{memory}.md"
+    for guard in (path, folder / "contexts", folder / "MEMORY.md"):
+        if guard.is_symlink():
+            raise LearnRefused(f"{guard.name} is a symlink; refusing to write through it")
     exists = path.exists()
     if not exists and not (description and description.strip() and body and body.strip()):
         raise LearnRefused(f"memory '{memory}' does not exist in this scope; description and body are required")
     _check_text(store, {"memory": memory, "mistake": mistake, "correction": correction, "body": body or "",
                         **oneline}, scope, vis_env, memory)
+    if not exists:
+        for m in store.memories():
+            if m.slug == memory and m.path != path and (scope == "global" or m.env in (None, vis_env)):
+                raise LearnRefused(f"memory '{memory}' already exists at {m.path.relative_to(store.root)}")
     dups = [] if exists else _duplicates(store, vis_env, memory, description)
     if dups and not new:
         raise LearnRefused("similar memories exist (use --new to override): " + ", ".join(dups), dups)

@@ -72,10 +72,67 @@ class LearnTest(unittest.TestCase):
         self.assertEqual(r.duplicates, ["spaces"])
 
     def test_secret_refused_nothing_written(self):
-        with self.assertRaises(LearnRefused):
-            self.learn(memory="spaces", **dict(NEW, correction="token = abcdef123456"))
+        secret = "token = abcdef123456"
+        for field in ("mistake", "correction", "body", "description", "files", "pr", "agent"):
+            kw = dict(NEW)
+            if field == "files":
+                kw["files"] = [secret]
+            elif field == "pr":
+                kw["pr"] = secret
+            else:
+                kw[field] = secret
+            with self.subTest(field), self.assertRaises(LearnRefused):
+                self.learn(memory="spaces", **kw)
         self.assertFalse((self.root / "acme/web/spaces.md").exists())
         self.assertFalse((self.root / "acme/web/contexts").exists())
+
+    def test_env_must_be_a_known_environment(self):
+        for bad in ("..", str(self.tmp), "nope"):
+            with self.subTest(bad), self.assertRaises(LearnRefused):
+                self.learn(memory="spaces", env=bad, **NEW)
+        self.assertEqual(list(self.tmp.glob("*.md")), [])
+
+    def test_env_escape_via_symlink_refused(self):
+        outside = self.tmp / "outside"
+        (outside / "web").mkdir(parents=True)
+        (self.root / "link").symlink_to(outside)
+        r = self.learn(memory="spaces", env="link", **NEW)  # symlinked env dir itself is allowed
+        self.assertEqual(r.memory.parent.resolve(), (outside / "web").resolve())
+        (self.root / "acme/web").rename(self.root / "acme/web-real")
+        (self.root / "acme/web").symlink_to(self.tmp)
+        with self.assertRaises(LearnRefused):
+            self.learn(memory="other-thing", env="acme", **dict(NEW, description="Entirely different words here"))
+
+    def test_symlinks_refused(self):
+        evil = self.tmp / "evil"
+        evil.mkdir()
+        folder = self.root / "acme/web"
+        (folder / "MEMORY.md").unlink()
+        (folder / "MEMORY.md").symlink_to(evil / "idx.md")
+        with self.assertRaises(LearnRefused):
+            self.learn(memory="spaces", **NEW)
+        (folder / "MEMORY.md").unlink()
+        (folder / "MEMORY.md").write_text("")
+        (folder / "contexts").symlink_to(evil)
+        with self.assertRaises(LearnRefused):
+            self.learn(memory="spaces", **NEW)
+        (folder / "contexts").unlink()
+        (folder / "spaces.md").symlink_to(evil / "m.md")
+        with self.assertRaises(LearnRefused):
+            self.learn(memory="spaces", **KW)
+        self.assertEqual(list(evil.iterdir()), [])
+
+    def test_same_slug_in_other_visible_scope_refused(self):
+        self.learn(memory="tabs", **dict(NEW, scope="global", description="Tabs are wrong"))
+        with self.assertRaises(LearnRefused) as cm:
+            self.learn(memory="tabs", new=True, **dict(NEW, description="Zebra giraffe lemur"))
+        self.assertIn("_global/tabs.md", str(cm.exception))
+        self.assertFalse((self.root / "acme/web/tabs.md").exists())
+
+    def test_reserved_slugs(self):
+        for bad in ("memory", "readme", "contexts"):
+            with self.subTest(bad), self.assertRaises(LearnRefused):
+                self.learn(memory=bad, **NEW)
 
     def test_home_path_env_vs_global(self):
         home = dict(NEW, mistake=f"edited {Path.home()}/x")
