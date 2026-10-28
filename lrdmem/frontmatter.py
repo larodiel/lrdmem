@@ -6,7 +6,7 @@ of indented `key: value` lines; values may be quoted or inline lists.
 
 import json
 
-_SPECIAL = (",", "]", ":", " ")
+_SPECIAL = (",", "]", ":", " ", "'", '"')
 
 
 def _unquote(value: str) -> str:
@@ -86,9 +86,12 @@ def parse(text: str) -> dict | None:
 
 def _fmt(value) -> str:
     if isinstance(value, list):
-        items = [json.dumps(i) if any(c in i for c in _SPECIAL) else i for i in value]
+        items = [json.dumps(i) if not i or any(c in i for c in _SPECIAL) else i for i in value]
         return "[" + ", ".join(items) + "]"
-    return str(value)
+    text = str(value)
+    if isinstance(value, str) and (not text or "\n" in text or text[0] in "\"'[" or text != text.strip()):
+        return json.dumps(text)
+    return text
 
 
 def dump(data: dict) -> str:

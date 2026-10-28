@@ -26,6 +26,10 @@ class FrontmatterTest(unittest.TestCase):
         d = {"paths": ["a b", "c,d", "e:f", "g]"]}
         self.assertEqual(parse(dump(d) + "\n"), d)
 
+    def test_roundtrip_quotes_and_empty(self):
+        d = {"files": ["it's.py", 'say "hi".py', "", "plain"], "note": "", "q": '"x"', "ml": "a\nb", "l": "[x]"}
+        self.assertEqual(parse(dump(d) + "\n"), d)
+
     def test_split_returns_body_and_quotes_stripped(self):
         data, body = split("---\nname: 'a'\nother: \"b\"\n---\nhello\n")
         self.assertEqual(data, {"name": "a", "other": "b"})

@@ -9,6 +9,7 @@ from pathlib import Path
 from lrdmem import __version__
 from lrdmem.export import to_dot, to_html, to_json
 from lrdmem.graph import AmbiguousSlug, Graph
+from lrdmem.learn import LearnRefused, learn
 from lrdmem.lint import lint, printable
 from lrdmem.session import Session
 from lrdmem.stale import stale
@@ -142,6 +143,22 @@ def _for(store: Store, g: Graph, args) -> int:
     return 0
 
 
+def _learn(store: Store, g: Graph, args) -> int:
+    try:
+        r = learn(store, Path.cwd(), memory=args.memory, mistake=args.mistake, correction=args.correction,
+                  scope=args.scope, agent=args.agent, source=args.source, files=args.files, pr=args.pr,
+                  kind=args.kind, description=args.description, body=args.body, env=args.env, new=args.new)
+    except LearnRefused as e:
+        print(printable(str(e)), file=sys.stderr)
+        for slug in e.duplicates:
+            print(printable(slug), file=sys.stderr)
+        return 1
+    _out(r.context.relative_to(store.root).as_posix())
+    if r.created:
+        _out(r.memory.relative_to(store.root).as_posix())
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the lrdmem CLI and return the process exit code."""
     parser = argparse.ArgumentParser(prog="lrdmem", description="Shared memory store for AI coding agents.")
@@ -171,6 +188,21 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--command")
     p.add_argument("--session")
     p.add_argument("--env")
+    p = sub.add_parser("learn", help="record a correction as a context linked to a memory")
+    p.set_defaults(fn=_learn)
+    p.add_argument("--memory", required=True)
+    p.add_argument("--mistake", required=True)
+    p.add_argument("--correction", required=True)
+    p.add_argument("--scope", choices=["repo", "env", "global"], required=True)
+    p.add_argument("--agent", required=True)
+    p.add_argument("--source", choices=["chat", "pr"], default="chat")
+    p.add_argument("--files", nargs="*", default=[])
+    p.add_argument("--pr")
+    p.add_argument("--kind")
+    p.add_argument("--description")
+    p.add_argument("--body")
+    p.add_argument("--env")
+    p.add_argument("--new", action="store_true")
     args = parser.parse_args(argv)
     if hasattr(args, "fn"):
         store = Store(store_root())
