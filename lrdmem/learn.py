@@ -37,7 +37,8 @@ class LearnResult:
     duplicates: list[str] = field(default_factory=list)
 
 
-def _terms(text: str) -> set[str]:
+def terms(text: str) -> set[str]:
+    """Lowercase words of 4+ characters, minus stop words; the basis of duplicate and PR matching."""
     return {w for w in re.split(r"[^a-z0-9]+", text.lower()) if len(w) >= 4 and w not in _STOP}
 
 
@@ -75,9 +76,9 @@ def _check_text(store: Store, fields: dict[str, str], scope: str, env: str | Non
 
 
 def _duplicates(store: Store, env: str | None, slug: str, description: str) -> list[str]:
-    mine = _terms(slug.replace("-", " ") + " " + description)
+    mine = terms(slug.replace("-", " ") + " " + description)
     return [m.slug for m in store.memories() if m.env in (None, env)
-            and len(mine & _terms(m.slug.replace("-", " ") + " " + m.description)) >= 2]
+            and len(mine & terms(m.slug.replace("-", " ") + " " + m.description)) >= 2]
 
 
 def _create(path: Path, text: str) -> bool:

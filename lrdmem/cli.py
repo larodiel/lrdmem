@@ -11,6 +11,7 @@ from lrdmem.export import to_dot, to_html, to_json
 from lrdmem.graph import AmbiguousSlug, Graph
 from lrdmem.learn import LearnRefused, learn
 from lrdmem.lint import lint, printable
+from lrdmem.pr import learn_pr
 from lrdmem.session import Session
 from lrdmem.stale import stale
 from lrdmem.store import AmbiguousRepo, Context, Memory, Store, resolve, store_root
@@ -159,6 +160,20 @@ def _learn(store: Store, g: Graph, args) -> int:
     return 0
 
 
+def _learn_pr(store: Store, g: Graph, args) -> int:
+    try:
+        r = learn_pr(store, Path.cwd(), args.url, args.agent, env=args.env)
+    except (ValueError, LookupError, AmbiguousRepo, subprocess.CalledProcessError, OSError) as e:
+        print(printable(str(e)), file=sys.stderr)
+        return 2 if isinstance(e, ValueError) else 1
+    for url, rel in r.linked:
+        _out(f"linked {url} -> {rel}")
+    for c in r.unmatched:
+        _out(c["url"])
+        _out(f"  {c['path']}: {next(iter(c['body'].splitlines()), '')}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the lrdmem CLI and return the process exit code."""
     parser = argparse.ArgumentParser(prog="lrdmem", description="Shared memory store for AI coding agents.")
@@ -203,6 +218,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--body")
     p.add_argument("--env")
     p.add_argument("--new", action="store_true")
+    p = sub.add_parser("learn-pr", help="link a GitHub PR's review comments to the memories they reinforce")
+    p.set_defaults(fn=_learn_pr)
+    p.add_argument("url")
+    p.add_argument("--agent", required=True)
+    p.add_argument("--env")
     args = parser.parse_args(argv)
     if hasattr(args, "fn"):
         store = Store(store_root())
