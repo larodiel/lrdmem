@@ -19,7 +19,7 @@ Repository = "https://github.com/larodiel/lrdmem"
 lrdmem = "lrdmem.cli:main"
 
 [tool.setuptools]
-packages = ["lrdmem"]
+packages = ["lrdmem", "lrdmem.hooks"]
 
 [tool.setuptools.package-data]
 lrdmem = ["skill/*", "hooks/*.js"]

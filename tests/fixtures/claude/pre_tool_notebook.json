@@ -1,0 +1,1 @@
+{"session_id": "s1", "cwd": "{cwd}", "hook_event_name": "PreToolUse", "tool_name": "NotebookEdit", "tool_input": {"notebook_path": "{cwd}/src/a.php", "new_source": "y"}}

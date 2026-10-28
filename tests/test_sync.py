@@ -232,6 +232,17 @@ class SyncTest(unittest.TestCase):
         self.assertIn("ab/x.md", files)
         self.assertNotIn("160000", files)
 
+    def test_global_target_is_the_root_repo_only(self):
+        root = self.tmp / "s"
+        write(root / "README.md", "r")
+        g(root, "init", "-q")
+        g(root, "init", "-q", "own")
+        write(root / "own" / "y.md", "y")
+        self.assertEqual(sync(Store(root), "_global"), [SyncResult("_global", True, False, None)])
+        self.assertEqual(g(root, "ls-files").split(), ["README.md"])
+        self.assertIn("?? y.md", g(root / "own", "status", "--porcelain"))
+        self.assertIsNone(pull(Store(root), "_global"))
+
     def test_plain_envs_in_root_repo_are_one_result(self):
         root = self.tmp / "s"
         write(root / "e1" / "x.md", "x")

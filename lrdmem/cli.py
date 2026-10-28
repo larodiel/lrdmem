@@ -9,6 +9,7 @@ from pathlib import Path
 from lrdmem import __version__, checks, config
 from lrdmem.export import to_dot, to_html, to_json
 from lrdmem.graph import AmbiguousSlug, Graph
+from lrdmem.hooks import dispatch
 from lrdmem.learn import LearnRefused, learn
 from lrdmem.lint import lint, printable
 from lrdmem.pr import learn_pr
@@ -252,6 +253,16 @@ def _sync(store: Store, g: Graph, args) -> int:
     return 1 if any(r.error for r in results) else 0
 
 
+def _hook(phase: str, agent: str) -> int:
+    try:
+        text = dispatch(phase, agent, sys.stdin.read())
+    except Exception:  # unreadable stdin: hooks stay silent
+        return 0
+    if text:
+        print(text)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the lrdmem CLI and return the process exit code."""
     parser = argparse.ArgumentParser(prog="lrdmem", description="Shared memory store for AI coding agents.")
@@ -323,7 +334,13 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("sync", help="commit and push the store (all environments, or one)")
     p.set_defaults(fn=_sync)
     p.add_argument("env", nargs="?")
+    p = sub.add_parser("hook", help="run a harness hook (JSON on stdin, harness JSON on stdout)")
+    p.add_argument("phase", help="session-start, pre-tool, post-tool, prompt or stop")
+    p.add_argument("--agent", required=True)
+    sub.add_parser("context", help="same as `hook session-start`").add_argument("--agent", required=True)
     args = parser.parse_args(argv)
+    if args.command in ("hook", "context"):
+        return _hook(getattr(args, "phase", "session-start"), args.agent)
     if args.command == "config":
         return _config(args)
     if hasattr(args, "fn"):

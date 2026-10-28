@@ -69,7 +69,7 @@ def _targets(store: Store, env: str | None) -> list[tuple[str, Path | None, Path
     root = store.root.resolve()
     seen: dict[Path, str] = {}
     out = []
-    names = [env] if env else [None, *store.environments()]
+    names = [None] if env == "_global" else [env] if env else [None, *store.environments()]  # "_global": root repo
     for name in names:
         path = store.root if name is None else store.root / name
         if name is not None and not path.is_dir():
@@ -149,7 +149,7 @@ def _sync_one(label: str, repo: Path, include: str, excludes: list[str], message
 
 
 def sync(store: Store, env: str | None = None, message: str | None = None) -> list[SyncResult]:
-    """Commit and push each repo (store root for _global, plus every env); only env's repo when given."""
+    """Commit and push each repo (store root for _global, plus every env); only env's repo when given ("_global": root)."""
     message = message or f"lrdmem: {config.load()['device']} {datetime.now():%Y-%m-%d %H:%M}"
     results = []
     for label, top, path in _targets(store, env):
