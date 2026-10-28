@@ -1,12 +1,16 @@
 """Command line entry point."""
 
 import argparse
+import subprocess
 import sys
+from pathlib import Path
 
 from lrdmem import __version__
 from lrdmem.graph import AmbiguousSlug, Graph
 from lrdmem.lint import lint, printable
-from lrdmem.store import Context, Memory, Store, store_root
+from lrdmem.session import Session
+from lrdmem.store import AmbiguousRepo, Context, Memory, Store, resolve, store_root
+from lrdmem.triggers import render, select
 
 
 def _out(text: str = "") -> None:
@@ -81,6 +85,35 @@ def _hot(store: Store, g: Graph, args) -> int:
     return 0
 
 
+def _repo_relative(file: str | None) -> str | None:
+    if not file or not Path(file).is_absolute():
+        return file
+    try:
+        top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True,
+                             check=True).stdout.strip()
+        return Path(file).resolve().relative_to(Path(top).resolve()).as_posix()
+    except (OSError, subprocess.CalledProcessError, ValueError):
+        return file
+
+
+def _for(store: Store, g: Graph, args) -> int:
+    try:
+        scope = resolve(store, Path.cwd(), args.env)
+    except AmbiguousRepo as e:
+        print(printable(str(e)), file=sys.stderr)
+        return 2
+    if not scope:
+        return 0
+    path = _repo_relative(args.file)
+    session = Session(args.session or "")
+    picked = select(store, *scope, path=path, command=args.command, exclude=session.injected)
+    if picked:
+        _out(render(picked, path or args.command or ""))
+        session.injected |= {m.slug for m in picked}
+        session.save()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the lrdmem CLI and return the process exit code."""
     parser = argparse.ArgumentParser(prog="lrdmem", description="Shared memory store for AI coding agents.")
@@ -98,6 +131,12 @@ def main(argv: list[str] | None = None) -> int:
         else:
             p.add_argument("slug")
             p.add_argument("--env")
+    p = sub.add_parser("for", help="print memories triggered by a file or command")
+    p.set_defaults(fn=_for)
+    p.add_argument("file", nargs="?")
+    p.add_argument("--command")
+    p.add_argument("--session")
+    p.add_argument("--env")
     args = parser.parse_args(argv)
     if hasattr(args, "fn"):
         store = Store(store_root())
