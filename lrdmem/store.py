@@ -17,6 +17,16 @@ class AmbiguousRepo(Exception):
     """Raised when a repo exists in more than one environment and no env was given."""
 
 
+def _list(value) -> list:
+    if value is None or value == {}:  # an empty `key:` parses as {}
+        return []
+    return value if isinstance(value, list) else [value]
+
+
+def _str(value) -> str:
+    return value if isinstance(value, str) else ""
+
+
 def _meta(data: dict) -> dict:
     meta = data.get("metadata")
     return meta if isinstance(meta, dict) else {}
@@ -36,7 +46,7 @@ class Memory:
     @property
     def type(self) -> str:
         """The metadata type, or an empty string."""
-        return _meta(self.data).get("type", "")
+        return _str(_meta(self.data).get("type"))
 
     @property
     def kind(self) -> str:
@@ -46,7 +56,7 @@ class Memory:
     @property
     def description(self) -> str:
         """The one-line description."""
-        return self.data.get("description", "")
+        return _str(self.data.get("description"))
 
     @property
     def triggers(self) -> dict:
@@ -68,8 +78,7 @@ class Memory:
     @property
     def supersedes(self) -> list[str]:
         """Slugs this memory replaces."""
-        s = self.data.get("supersedes", [])
-        return s if isinstance(s, list) else [s]
+        return _list(self.data.get("supersedes"))
 
 
 @dataclass
@@ -86,17 +95,19 @@ class Context:
     @property
     def memories(self) -> list[str]:
         """Slugs of the memories this context reinforces."""
-        m = self.data.get("memories", [])
-        return m if isinstance(m, list) else [m]
+        return _list(self.data.get("memories"))
 
     @property
     def date(self) -> str:
         """The context date, or an empty string."""
-        return self.data.get("date", "")
+        return _str(self.data.get("date"))
 
 
-def _read(path: Path) -> tuple[dict, str]:
-    data, body = split(path.read_text())
+def _read(path: Path) -> tuple[dict, str] | None:
+    try:
+        data, body = split(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
     return data or {}, body
 
 
@@ -121,7 +132,11 @@ class Store:
         for e in [env] if env else self.environments():
             base = self.root / e
             if base.is_dir():
-                out += sorted(p for p in base.iterdir() if p.is_dir() and p.name != "contexts")
+                out += sorted(
+                    (p for p in base.iterdir() if p.is_dir() and p.name != "contexts"
+                     and (p.name == "_global" or not p.name.startswith((".", "_")))),
+                    key=lambda p: (p.name != "_global", p.name),
+                )
         return out
 
     def _scoped(self, folder: Path) -> tuple[str | None, str | None]:
@@ -137,8 +152,9 @@ class Store:
             env, repo = self._scoped(folder)
             for p in sorted(folder.glob("*.md")):
                 if p.name not in _IGNORED:
-                    data, body = _read(p)
-                    out.append(Memory(p.stem, p, env, repo, data, body))
+                    read = _read(p)
+                    if read:
+                        out.append(Memory(p.stem, p, env, repo, *read))
         return out
 
     def contexts(self) -> list[Context]:
@@ -147,8 +163,9 @@ class Store:
         for folder in self.folders():
             env, repo = self._scoped(folder)
             for p in sorted((folder / "contexts").glob("*.md")):
-                data, body = _read(p)
-                out.append(Context(data.get("id", p.stem), p, env, repo, data, body))
+                read = _read(p)
+                if read:
+                    out.append(Context(_str(read[0].get("id")) or p.stem, p, env, repo, *read))
         return out
 
     def memory(self, slug: str, env: str | None) -> Memory | None:
@@ -187,7 +204,8 @@ def resolve(store: Store, cwd: Path, env: str | None = None) -> tuple[str, str] 
 
 
 def store_root() -> Path:
-    """Store root from $LRDMEM_STORE; ponytail: Task 9 adds the config fallback."""
+    """Store root from $LRDMEM_STORE."""
+    # ponytail: Task 9 adds the config fallback.
     value = os.environ.get("LRDMEM_STORE")
     if not value:
         raise RuntimeError("store not configured: set LRDMEM_STORE")

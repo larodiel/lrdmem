@@ -80,6 +80,23 @@ class StoreTest(unittest.TestCase):
         self.assertEqual(s.scope_for("work", "app"), [root / "_global", root / "work/_global", root / "work/app"])
         self.assertEqual(s.folders()[0], root / "_global")
 
+    def test_folder_filter_order_and_robustness(self):
+        root = make_store(self.tmp, {
+            "work/.obsidian/x.md": _mem(), "work/_x/x.md": _mem(), "work/Zed/a.md": _mem(),
+            "work/_global/w.md": _mem(),
+            "work/app/bad.md": "x", "work/app/ok.md": "---\nsupersedes:\nname: n\n---\n",
+            "work/app/contexts/c.md": "---\nmemories:\ndate:\n---\n",
+        })
+        (root / "work/.git").mkdir()
+        (root / "work/app/bad.md").write_bytes(b"\xff\xfe\x00bad")
+        s = Store(root)
+        self.assertEqual([p.name for p in s.folders("work")], ["_global", "Zed", "app"])
+        self.assertEqual({m.slug for m in s.memories()}, {"w", "a", "ok"})
+        ok = s.memory("ok", "work")
+        self.assertEqual((ok.supersedes, ok.description, ok.type), ([], "", ""))
+        c = s.contexts()[0]
+        self.assertEqual((c.memories, c.date, c.id), ([], "", "c"))
+
     def test_store_root(self):
         old = os.environ.pop("LRDMEM_STORE", None)
         self.addCleanup(lambda: os.environ.__setitem__("LRDMEM_STORE", old) if old else os.environ.pop("LRDMEM_STORE", None))
