@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from lrdmem import __version__
+from lrdmem import __version__, checks, config
 from lrdmem.export import to_dot, to_html, to_json
 from lrdmem.graph import AmbiguousSlug, Graph
 from lrdmem.learn import LearnRefused, learn
@@ -148,7 +148,8 @@ def _learn(store: Store, g: Graph, args) -> int:
     try:
         r = learn(store, Path.cwd(), memory=args.memory, mistake=args.mistake, correction=args.correction,
                   scope=args.scope, agent=args.agent, source=args.source, files=args.files, pr=args.pr,
-                  kind=args.kind, description=args.description, body=args.body, env=args.env, new=args.new)
+                  kind=args.kind, description=args.description, body=args.body, env=args.env, new=args.new,
+                  device=config.load()["device"])
     except LearnRefused as e:
         print(printable(str(e)), file=sys.stderr)
         for slug in e.duplicates:
@@ -162,7 +163,7 @@ def _learn(store: Store, g: Graph, args) -> int:
 
 def _learn_pr(store: Store, g: Graph, args) -> int:
     try:
-        r = learn_pr(store, Path.cwd(), args.url, args.agent, env=args.env)
+        r = learn_pr(store, Path.cwd(), args.url, args.agent, env=args.env, device=config.load()["device"])
     except subprocess.CalledProcessError as e:
         print(printable(f"gh failed: {(e.stderr or '').strip() or e}"), file=sys.stderr)
         return 1
@@ -176,6 +177,58 @@ def _learn_pr(store: Store, g: Graph, args) -> int:
         note = f" (not stored: {c['note']})" if c.get("note") else ""
         _out(f"  {c['path'] + ': ' if c['path'] else ''}{next(iter(c['body'].splitlines()), '')}{note}")
     return 0
+
+
+def _config(args) -> int:
+    cfg = config.load()
+    if args.action == "set":
+        cfg[args.key] = str(Path(args.value).resolve()) if args.key == "store" else args.value
+    elif args.action == "autopush":
+        cfg["autopush"][args.env or "*"] = args.state == "on"
+    if args.action == "show":
+        _out(json.dumps(cfg, indent=2))
+    else:
+        config.save(cfg)
+    return 0
+
+
+def _allow(store: Store, g: Graph, args) -> int:
+    cfg = config.load()
+    if not args.slug:
+        for m in checks.pending(store, cfg):
+            _out(f"{checks.key(store, m)}: {m.check['run']}")
+        return 0
+    by_path = [m for m in store.memories() if checks.key(store, m) == args.slug]
+    m = by_path[0] if by_path else _pick(store, g, args)
+    if isinstance(m, int):
+        return m
+    if not checks.command_text(m):
+        print(printable(f"'{args.slug}' has no check.run to approve"), file=sys.stderr)
+        return 1
+    _out(f"{checks.key(store, m)}: {m.check['run']}")
+    _out(m.path.as_posix())
+    cfg["allow"][checks.key(store, m)] = checks.command_hash(m)
+    config.save(cfg)
+    _out("Approved. Only approve commands you have read.")
+    return 0
+
+
+def _check(store: Store, g: Graph, args) -> int:
+    try:
+        scope = resolve(store, Path.cwd(), args.env)
+    except AmbiguousRepo as e:
+        print(printable(str(e)), file=sys.stderr)
+        return 2
+    root = _git_root()
+    if not scope or not root:
+        return 0
+    r = checks.run_checks(store, *scope, root, args.on, args.files, config.load())
+    for slug, tail in r.failures:
+        _out(f"lrdmem check failed: {slug}")
+        _out(tail)
+    for slug in r.skipped_pending:
+        _out(f"lrdmem check skipped: {slug} is not approved. Run `lrdmem allow {slug}` after reading its command.")
+    return 1 if r.failures else 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -227,7 +280,28 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("url")
     p.add_argument("--agent", required=True)
     p.add_argument("--env")
+    p = sub.add_parser("config", help="show or change this device's configuration")
+    csub = p.add_subparsers(dest="action", required=True)
+    q = csub.add_parser("set", help="set store (path) or device (name)")
+    q.add_argument("key", choices=["store", "device"])
+    q.add_argument("value")
+    q = csub.add_parser("autopush", help="commit and push automatically for an environment (default: all)")
+    q.add_argument("state", choices=["on", "off"])
+    q.add_argument("--env")
+    csub.add_parser("show", help="print the configuration as JSON")
+    p = sub.add_parser("allow", help="approve a memory's check command to run on this device. "
+                                     "Only approve commands you have read.")
+    p.set_defaults(fn=_allow)
+    p.add_argument("slug", nargs="?", help="memory slug or store-relative path; omit to list pending commands")
+    p.add_argument("--env")
+    p = sub.add_parser("check", help="run the approved checks of obligations matching the given files")
+    p.set_defaults(fn=_check)
+    p.add_argument("--on", choices=["stop", "post-edit"], required=True)
+    p.add_argument("--files", nargs="*", default=[])
+    p.add_argument("--env")
     args = parser.parse_args(argv)
+    if args.command == "config":
+        return _config(args)
     if hasattr(args, "fn"):
         store = Store(store_root())
         return args.fn(store, Graph(store), args)

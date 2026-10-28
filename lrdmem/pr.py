@@ -67,7 +67,8 @@ def fetch_review_comments(url: str, run=subprocess.run) -> list[dict]:
     return out
 
 
-def learn_pr(store: Store, cwd: Path, url: str, agent: str, run=subprocess.run, env: str | None = None) -> PrResult:
+def learn_pr(store: Store, cwd: Path, url: str, agent: str, run=subprocess.run, env: str | None = None,
+             device: str = "") -> PrResult:
     """Record each human review comment as a context of its best-matching memory; LookupError if cwd is not opted in."""
     pr_repo = _parse(url)[1]
     found = resolve(store, cwd, env)
@@ -96,7 +97,7 @@ def learn_pr(store: Store, cwd: Path, url: str, agent: str, run=subprocess.run, 
         try:
             learn(store, cwd, memory=best.slug, mistake=" ".join(c["body"].split())[:_MISTAKE],
                   correction=f"PR review by {c['author']}", scope=scope, agent=agent, source="pr", pr=c["url"],
-                  files=[c["path"]] if c["path"] else [], env=best.env)
+                  files=[c["path"]] if c["path"] else [], env=best.env, device=device)
         except Exception as err:  # untrusted input: never abort the run
             print(printable(f"skipped {c['url']}: {err}"), file=sys.stderr)
             continue

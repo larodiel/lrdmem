@@ -6,6 +6,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from lrdmem import config
 from lrdmem.frontmatter import split
 
 IGNORED = {"MEMORY.md", "README.md"}
@@ -205,9 +206,8 @@ def resolve(store: Store, cwd: Path, env: str | None = None) -> tuple[str, str] 
 
 
 def store_root() -> Path:
-    """Store root from $LRDMEM_STORE."""
-    # ponytail: Task 9 adds the config fallback.
-    value = os.environ.get("LRDMEM_STORE")
+    """Store root: $LRDMEM_STORE, else the configured store; RuntimeError when neither is set."""
+    value = os.environ.get("LRDMEM_STORE") or config.load()["store"]
     if not value:
-        raise RuntimeError("store not configured: set LRDMEM_STORE")
+        raise RuntimeError("store not configured: set LRDMEM_STORE or run `lrdmem config set store PATH`")
     return Path(value)
