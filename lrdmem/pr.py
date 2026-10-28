@@ -12,6 +12,7 @@ from lrdmem.lint import printable
 from lrdmem.store import Store, resolve
 
 _URL = re.compile(r"^https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/pull/(\d+)(?:#.*|/files.*)?$")
+_REMOTE = re.compile(r"^(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$")
 _TRUSTED = {"OWNER", "MEMBER", "COLLABORATOR"}
 _MIN_SHARED = 2
 _MISTAKE = 300
@@ -53,6 +54,18 @@ def _item(c: dict, path: str) -> dict:
             "author": (c.get("user") or {}).get("login", ""), "association": c.get("author_association") or "none"}
 
 
+def _github_remotes(cwd: Path) -> set[tuple[str, str]]:
+    """Lowercased (owner, repo) pairs of the checkout's GitHub remotes; other hosts are ignored."""
+    try:
+        top = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=cwd, capture_output=True, text=True,
+                             check=True).stdout.strip()
+        out = subprocess.run(["git", "-C", top, "remote", "-v"], capture_output=True, text=True, check=True).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return set()
+    found = (_REMOTE.match(parts[1]) for parts in (ln.split() for ln in out.splitlines()) if len(parts) > 1)
+    return {(m.group(1).lower(), m.group(2).lower()) for m in found if m}
+
+
 def fetch_review_comments(url: str, run=subprocess.run) -> list[dict]:
     """Inline and review comments of a PR as dicts with id, url, path, body, author, association; ValueError on a bad URL."""
     owner, repo, n = _parse(url)
@@ -70,13 +83,18 @@ def fetch_review_comments(url: str, run=subprocess.run) -> list[dict]:
 def learn_pr(store: Store, cwd: Path, url: str, agent: str, run=subprocess.run, env: str | None = None,
              device: str = "") -> PrResult:
     """Record each human review comment as a context of its best-matching memory; LookupError if cwd is not opted in."""
-    pr_repo = _parse(url)[1]
+    owner, pr_repo, _ = _parse(url)
     found = resolve(store, cwd, env)
     if not found:
         raise LookupError("this repository is not opted in to the store")
     e, repo = found
     if pr_repo.lower() != repo.lower():
         raise LookupError(f"PR repository '{pr_repo}' is not the opted-in repository '{repo}'")
+    remotes = _github_remotes(cwd)
+    if not remotes:
+        raise LookupError("this checkout has no GitHub remote to bind the PR to")
+    if (owner.lower(), pr_repo.lower()) not in remotes:
+        raise LookupError(f"PR {owner}/{pr_repo} is not a GitHub remote of this checkout")
     comments = fetch_review_comments(url, run)
     cands = sorted((m for m in store.memories() if m.env is None or (m.env == e and m.repo in (None, repo))),
                    key=lambda m: m.slug)

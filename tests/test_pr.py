@@ -57,7 +57,11 @@ class PrTest(unittest.TestCase):
         self.repo = tmp / "web"
         self.repo.mkdir()
         subprocess.run(["git", "init", "-q"], cwd=self.repo, check=True)
+        self.remote("origin", "https://github.com/o/web.git")
         self.store = Store(self.root)
+
+    def remote(self, name, url):
+        subprocess.run(["git", "remote", "add", name, url], cwd=self.repo, check=True)
 
     def test_fetch_parses_url_and_args(self):
         run = fake_run([comment(1, "hi"), comment(2, "bot", "ci[bot]")],
@@ -127,6 +131,37 @@ class PrTest(unittest.TestCase):
                 with self.assertRaises(LookupError):
                     learn_pr(self.store, self.repo, u, "claude", run)
         self.assertEqual(len(list((self.root / "acme/web/contexts").glob("*.md"))), 1)
+
+    def test_remote_forms_accepted(self):
+        for url in ("git@github.com:O/Web.git", "ssh://git@github.com/o/web", "https://github.com/o/web"):
+            subprocess.run(["git", "remote", "set-url", "origin", url], cwd=self.repo, check=True)
+            r = learn_pr(self.store, self.repo, URL, "claude", fake_run([comment(1, "Rename it")]))
+            self.assertEqual(len(r.unmatched), 1, url)
+
+    def test_same_name_other_owner_refused_before_gh(self):
+        run = fake_run([comment(1, "indent with spaces")])
+        with self.assertRaises(LookupError):
+            learn_pr(self.store, self.repo, URL.replace("/o/", "/evil/"), "claude", run)
+        self.assertEqual(run.calls, [])
+        self.assertFalse((self.root / "acme/web/contexts").exists())
+
+    def test_other_remote_of_checkout_accepted_non_github_ignored(self):
+        subprocess.run(["git", "remote", "set-url", "origin", "https://gitlab.com/evil/web.git"], cwd=self.repo, check=True)
+        self.remote("upstream", "git@github.com:up/web.git")
+        run = fake_run([comment(1, "Rename it")])
+        learn_pr(self.store, self.repo, URL.replace("/o/", "/up/"), "claude", run)
+        self.assertTrue(run.calls)
+        run = fake_run([])
+        with self.assertRaises(LookupError):
+            learn_pr(self.store, self.repo, URL, "claude", run)  # o/web only matched the gitlab remote
+        self.assertEqual(run.calls, [])
+
+    def test_no_github_remote_refused(self):
+        subprocess.run(["git", "remote", "remove", "origin"], cwd=self.repo, check=True)
+        run = fake_run([comment(1, "x")])
+        with self.assertRaisesRegex(LookupError, "GitHub remote"):
+            learn_pr(self.store, self.repo, URL, "claude", run)
+        self.assertEqual(run.calls, [])
 
     def test_multi_page(self):
         run = fake_run(Pages([comment(1, "indent with spaces")], [comment(2, "Rename it")]))
