@@ -86,12 +86,12 @@ def _hot(store: Store, g: Graph, args) -> int:
 
 
 def _repo_relative(file: str | None) -> str | None:
-    if not file or not Path(file).is_absolute():
+    if not file:
         return file
     try:
-        top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True,
-                             check=True).stdout.strip()
-        return Path(file).resolve().relative_to(Path(top).resolve()).as_posix()
+        top = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=Path.cwd(), capture_output=True,
+                             text=True, check=True).stdout.strip()
+        return (Path.cwd() / file).resolve().relative_to(Path(top).resolve()).as_posix()
     except (OSError, subprocess.CalledProcessError, ValueError):
         return file
 
