@@ -15,6 +15,7 @@ from lrdmem.pr import learn_pr
 from lrdmem.session import Session
 from lrdmem.stale import stale
 from lrdmem.store import AmbiguousRepo, Context, Memory, Store, resolve, store_root
+from lrdmem.sync import sync
 from lrdmem.triggers import render, select
 
 
@@ -240,6 +241,17 @@ def _check(store: Store, g: Graph, args) -> int:
     return 1 if r.failures else 0
 
 
+def _sync(store: Store, g: Graph, args) -> int:
+    results = sync(store, args.env)
+    for r in results:
+        if r.error:
+            _out(f"{r.env}: error: {r.error}")
+        else:
+            _out(f"{r.env}: {'committed' if r.committed else 'nothing to commit'}, "
+                 f"{'pushed' if r.pushed else 'not pushed (no remote)'}")
+    return 1 if any(r.error for r in results) else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the lrdmem CLI and return the process exit code."""
     parser = argparse.ArgumentParser(prog="lrdmem", description="Shared memory store for AI coding agents.")
@@ -308,6 +320,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--on", choices=["stop", "post-edit"], required=True)
     p.add_argument("--files", nargs="*", default=[])
     p.add_argument("--env")
+    p = sub.add_parser("sync", help="commit and push the store (all environments, or one)")
+    p.set_defaults(fn=_sync)
+    p.add_argument("env", nargs="?")
     args = parser.parse_args(argv)
     if args.command == "config":
         return _config(args)
