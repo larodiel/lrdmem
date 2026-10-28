@@ -43,7 +43,7 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(config.load()["extra"], {"a": 1})
         self.assertEqual(json.loads(self.path.read_text())["extra"], {"a": 1})
 
-    def test_save_cleans_temp_and_fixes_dir_mode(self):
+    def test_save_cleans_temp_and_dir_mode_rules(self):
         self.path.parent.mkdir(mode=0o755)
         os.chmod(self.path.parent, 0o755)
         with mock.patch("os.replace", side_effect=RuntimeError):
@@ -51,7 +51,15 @@ class ConfigTest(unittest.TestCase):
                 config.save(config.load())
         self.assertEqual(list(self.path.parent.iterdir()), [])
         config.save(config.load())
-        self.assertEqual(stat.S_IMODE(self.path.parent.stat().st_mode), 0o700)
+        self.assertEqual(stat.S_IMODE(self.path.parent.stat().st_mode), 0o755)  # not ours to tighten
+
+    def test_save_tightens_existing_lrdmem_dir(self):
+        d = self.tmp / "lrdmem"
+        d.mkdir()
+        os.chmod(d, 0o755)
+        with mock.patch.dict(os.environ, {"LRDMEM_CONFIG": str(d / "config.json")}):
+            config.save(config.load())
+        self.assertEqual(stat.S_IMODE(d.stat().st_mode), 0o700)
 
     def test_store_root_falls_back_to_config(self):
         with self.assertRaises(RuntimeError):

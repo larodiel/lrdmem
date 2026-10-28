@@ -34,7 +34,7 @@ def save(cfg: dict) -> None:
     """Atomically write the config (file 0600, parent dir 0700); unknown keys are kept as given."""
     path = _path()
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if path.parent.stat().st_uid == os.getuid():
+    if path.parent.name == "lrdmem" and path.parent.stat().st_uid == os.getuid():  # never tighten e.g. $HOME
         os.chmod(path.parent, 0o700)
     fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")  # mode 0o600
     try:

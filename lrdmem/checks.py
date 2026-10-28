@@ -12,6 +12,7 @@ from lrdmem.triggers import matches
 
 TIMEOUT = 300
 TAIL = 60
+KILL_WAIT = 5  # seconds to wait for output pipes after killing the group
 
 
 @dataclass
@@ -79,6 +80,8 @@ def problem(memory: Memory) -> str | None:
         return "no check.run"
     if not all(0x20 <= ord(c) <= 0x7E for c in cmd):
         return "unapprovable: non-printable or non-ASCII characters"
+    if "{files}" in cmd and any(t in cmd for t in ("$(", "`", "${")):
+        return "unrunnable: {files} cannot be combined with $(, ` or ${"
     if _script(cmd) is None:
         return "unrunnable: {files} must be an unquoted word"
     return None
@@ -98,7 +101,10 @@ def _kill(proc: subprocess.Popen) -> None:
         os.killpg(proc.pid, signal.SIGKILL)
     except OSError:
         proc.kill()
-    proc.communicate()
+    try:
+        proc.communicate(timeout=KILL_WAIT)
+    except subprocess.TimeoutExpired:  # a grandchild in its own session still holds the pipe
+        proc.stdout.close()
 
 
 def run_checks(store: Store, env: str, repo: str, repo_root: Path, on: str, files: list[str], cfg: dict) -> CheckResult:

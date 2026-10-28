@@ -95,6 +95,23 @@ class ChecksTest(_Base):
         with self.assertRaises(ProcessLookupError):
             os.kill(pid, 0)
 
+    def test_timeout_with_escaped_grandchild_does_not_hang(self):
+        gc = ("python3 -c 'import os,time; open(\"gpid\",\"w\").write(str(os.getpid())); os.setsid(); "
+              "time.sleep(30)' & echo started; wait")
+        self._store(gc)
+        self.addCleanup(self._reap)
+        start = time.time()
+        with mock.patch.object(checks, "TIMEOUT", 1), mock.patch.object(checks, "KILL_WAIT", 1):
+            r = self._run(["a.php"], cfg=self._approve())
+        self.assertLess(time.time() - start, 10)
+        self.assertEqual(r.failures, [("phpcs", "timed out after 1s")])
+
+    def _reap(self):
+        try:
+            os.kill(int((self.repo / "gpid").read_text()), 9)
+        except (OSError, ValueError):
+            pass
+
     def _unsafe_template(self, run):
         self._store(run)
         r = self._run(["a.php"], cfg=self._approve())
@@ -105,10 +122,20 @@ class ChecksTest(_Base):
 
     def test_quoted_placeholders_are_unrunnable(self):
         for run in ('echo "{files}" > ran.txt', "sh -c 'echo {files}' > ran.txt", "echo '{files}' > ran.txt",
-                    'echo x{files} > ran.txt', 'echo \\{files} > ran.txt', 'echo "$(echo {files})" > ran.txt',
+                    'echo x{files} > ran.txt', 'echo \\{files} > ran.txt', 'echo "(echo {files})" > ran.txt',
                     'echo {files}; echo "{files}" > ran.txt'):
             with self.subTest(run=run):
                 self._unsafe_template(run)
+                shutil.rmtree(self.root)
+
+    def test_placeholder_with_substitution_is_unrunnable(self):
+        for run in ('echo "$( cat {files} )"', 'echo $( cat {files} )', 'echo "$(echo " {files} ")"',
+                    'echo `cat {files}`', 'echo ${x:-{files}}', 'echo {files} $(true)'):
+            with self.subTest(run=run):
+                self._store(run)
+                r = self._run(["a.php"], cfg=self._approve())
+                self.assertEqual((r.ran, r.failures), ([], []))
+                self.assertEqual(r.unrunnable, [("phpcs", "unrunnable: {files} cannot be combined with $(, ` or ${")])
                 shutil.rmtree(self.root)
 
     def test_hostile_names_create_nothing(self):
