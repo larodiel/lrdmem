@@ -163,14 +163,18 @@ def _learn(store: Store, g: Graph, args) -> int:
 def _learn_pr(store: Store, g: Graph, args) -> int:
     try:
         r = learn_pr(store, Path.cwd(), args.url, args.agent, env=args.env)
-    except (ValueError, LookupError, AmbiguousRepo, subprocess.CalledProcessError, OSError) as e:
+    except subprocess.CalledProcessError as e:
+        print(printable(f"gh failed: {(e.stderr or '').strip() or e}"), file=sys.stderr)
+        return 1
+    except (ValueError, LookupError, AmbiguousRepo, RuntimeError, OSError) as e:
         print(printable(str(e)), file=sys.stderr)
         return 2 if isinstance(e, ValueError) else 1
     for url, rel in r.linked:
         _out(f"linked {url} -> {rel}")
     for c in r.unmatched:
         _out(c["url"])
-        _out(f"  {c['path']}: {next(iter(c['body'].splitlines()), '')}")
+        note = f" (not stored: {c['note']})" if c.get("note") else ""
+        _out(f"  {c['path'] + ': ' if c['path'] else ''}{next(iter(c['body'].splitlines()), '')}{note}")
     return 0
 
 
