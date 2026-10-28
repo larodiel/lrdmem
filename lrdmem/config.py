@@ -34,11 +34,15 @@ def save(cfg: dict) -> None:
     """Atomically write the config (file 0600, parent dir 0700); unknown keys are kept as given."""
     path = _path()
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if path.parent.stat().st_uid == os.getuid():
+        os.chmod(path.parent, 0o700)
     fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")  # mode 0o600
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(cfg, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, path)
-    except OSError:
-        os.unlink(tmp)
-        raise
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)

@@ -196,7 +196,9 @@ def _allow(store: Store, g: Graph, args) -> int:
     cfg = config.load()
     if not args.slug:
         for m in checks.pending(store, cfg):
-            _out(f"{checks.key(store, m)}: {m.check['run']}")
+            why = checks.problem(m)
+            _out(f"{checks.key(store, m)}: {m.check['run']}" + (f"  [{why}]" if why else ""))
+        _out("Only approve commands you have read.")
         return 0
     by_path = [m for m in store.memories() if checks.key(store, m) == args.slug]
     m = by_path[0] if by_path else _pick(store, g, args)
@@ -205,7 +207,12 @@ def _allow(store: Store, g: Graph, args) -> int:
     if not checks.command_text(m):
         print(printable(f"'{args.slug}' has no check.run to approve"), file=sys.stderr)
         return 1
+    why = checks.problem(m)
+    if why:
+        print(printable(f"'{args.slug}': {why}"), file=sys.stderr)
+        return 1
     _out(f"{checks.key(store, m)}: {m.check['run']}")
+    _out(f"sha256 {checks.command_hash(m)}")
     _out(m.path.as_posix())
     cfg["allow"][checks.key(store, m)] = checks.command_hash(m)
     config.save(cfg)
@@ -226,6 +233,8 @@ def _check(store: Store, g: Graph, args) -> int:
     for slug, tail in r.failures:
         _out(f"lrdmem check failed: {slug}")
         _out(tail)
+    for slug, why in r.unrunnable:
+        _out(f"lrdmem check skipped: {slug} ({why})")
     for slug in r.skipped_pending:
         _out(f"lrdmem check skipped: {slug} is not approved. Run `lrdmem allow {slug}` after reading its command.")
     return 1 if r.failures else 0

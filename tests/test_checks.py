@@ -1,8 +1,10 @@
 import io
 import json
 import os
+import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -10,7 +12,7 @@ from unittest import mock
 
 from lrdmem import checks, config
 from lrdmem.cli import main
-from lrdmem.store import Store
+from lrdmem.store import Memory, Store
 from tests.fixtures import make_store
 
 
@@ -79,10 +81,55 @@ class ChecksTest(_Base):
         self.assertEqual(r.failures[0][1].splitlines()[-1], "100")
         self.assertEqual(len(r.failures[0][1].splitlines()), 60)
 
-        def boom(*a, **k):
-            raise subprocess.TimeoutExpired("c", 300)
-        r = checks.run_checks(self.store, "work", "app", self.repo, "post-edit", ["a.php"], self._approve(), run=boom)
-        self.assertEqual(r.failures, [("phpcs", "timed out after 300s")])
+        with mock.patch.object(checks, "TIMEOUT", 1):
+            (self.root / "work/app/phpcs.md").write_text(_ob("sleep 30"))
+            r = self._run(["a.php"], cfg=self._approve())
+        self.assertEqual(r.failures, [("phpcs", "timed out after 1s")])
+
+    def test_timeout_kills_whole_group(self):
+        self._store("sh -c 'sleep 30 & echo $! > pid; wait'")
+        with mock.patch.object(checks, "TIMEOUT", 1):
+            self._run(["a.php"], cfg=self._approve())
+        pid = int((self.repo / "pid").read_text())
+        time.sleep(0.2)
+        with self.assertRaises(ProcessLookupError):
+            os.kill(pid, 0)
+
+    def _unsafe_template(self, run):
+        self._store(run)
+        r = self._run(["a.php"], cfg=self._approve())
+        self.assertEqual((r.ran, r.failures, r.skipped_pending), ([], [], []))
+        self.assertEqual([s for s, _ in r.unrunnable], ["phpcs"])
+        self.assertIn("{files} must be an unquoted word", r.unrunnable[0][1])
+        self.assertFalse((self.repo / "ran.txt").exists())
+
+    def test_quoted_placeholders_are_unrunnable(self):
+        for run in ('echo "{files}" > ran.txt', "sh -c 'echo {files}' > ran.txt", "echo '{files}' > ran.txt",
+                    'echo x{files} > ran.txt', 'echo \\{files} > ran.txt', 'echo "$(echo {files})" > ran.txt',
+                    'echo {files}; echo "{files}" > ran.txt'):
+            with self.subTest(run=run):
+                self._unsafe_template(run)
+                shutil.rmtree(self.root)
+
+    def test_hostile_names_create_nothing(self):
+        self._store("printf '%s\\n' {files} > out.txt")
+        names = ["$(touch PWNED).php", "x';touch PWNED2;'.php", "`touch PWNED3`.php", "--config=evil.php"]
+        r = self._run(names, cfg=self._approve())
+        self.assertEqual(r.failures, [])
+        self.assertEqual((self.repo / "out.txt").read_text().splitlines(), names[:3] + ["./--config=evil.php"])
+        self.assertEqual(sorted(p.name for p in self.repo.iterdir()), ["out.txt"])
+
+    def test_non_printable_or_non_ascii_unapprovable_and_unrunnable(self):
+        for run in ("echo \u202e hi", "echo \x1b[31m", "echo caf\u00e9"):
+            with self.subTest(run=run):
+                self.assertIn("unapprovable: non-printable or non-ASCII characters",
+                              checks.problem(Memory("m", Path("x.md"), None, None, {"metadata": {"kind": "obligation"}, "check": {"run": run}}, "")))
+
+    def test_key_includes_env(self):
+        self._store("true")
+        cfg = config.load()
+        cfg["allow"]["other/app/phpcs"] = checks.command_hash(self.store.memories()[0])
+        self.assertEqual([m.slug for m in checks.pending(self.store, cfg)], ["phpcs"])
 
     def test_on_filter_and_empty_files_and_no_placeholder(self):
         self._store("printf x > ran.txt", on="stop")
@@ -115,20 +162,37 @@ class CliChecksTest(_Base):
         code, out, _ = self._main("allow")
         self.assertIn("work/app/phpcs", out)
         self.assertIn("sh -c 'exit 3'", out)
+        self.assertIn("Only approve commands you have read.", out)
         code, out, err = self._main("check", "--on", "post-edit", "--files", "a.php")
         self.assertEqual(code, 0)
-        self.assertIn("phpcs", out + err)  # pending notice
+        self.assertIn("lrdmem check skipped: phpcs is not approved", out)
         code, out, _ = self._main("allow", "phpcs")
         self.assertEqual(code, 0)
         self.assertIn("Only approve commands you have read.", out)
         self.assertIn("sh -c 'exit 3'", out)
+        self.assertIn(checks.command_hash(self.store.memories()[0]), out)
         self.assertEqual(config.load()["allow"]["work/app/phpcs"],
                          checks.command_hash(self.store.memories()[0]))
         code, out, err = self._main("check", "--on", "post-edit", "--files", "a.php")
         self.assertEqual(code, 1)
-        self.assertIn("phpcs", out + err)
+        self.assertIn("lrdmem check failed: phpcs", out)
         self.assertEqual(self._main("allow", "work/app/phpcs")[0], 0)
         self.assertEqual(self._main("allow", "nope")[0], 1)
+
+    def test_allow_refuses_unsafe_and_ambiguous(self):
+        self._store('echo "{files}"')
+        os.environ["LRDMEM_STORE"] = str(self.root)
+        code, out, err = self._main("allow", "phpcs")
+        self.assertEqual(code, 1)
+        self.assertIn("{files} must be an unquoted word", err)
+        self.assertEqual(config.load()["allow"], {})
+        self.assertIn("unrunnable", self._main("allow")[1])
+        (self.root / "work/app/phpcs.md").write_text(_ob("true"))
+        (self.root / "other/app").mkdir(parents=True)
+        (self.root / "other/app/phpcs.md").write_text(_ob("true"))
+        code, _, err = self._main("allow", "phpcs")
+        self.assertEqual(code, 2)
+        self.assertIn("work/app/phpcs", err)
 
     def test_check_not_opted_in_is_silent(self):
         self.root = make_store(self.tmp, {"work/other/m.md": _ob("true")})
