@@ -184,10 +184,41 @@ class SyncTest(unittest.TestCase):
         with mock.patch("lrdmem.sync.subprocess.run", spy):
             sync(a)
         self.assertTrue(calls)
-        for kw in calls:
+        for kw in (k for k in calls if "env" in k):
             self.assertEqual(kw["stdin"], subprocess.DEVNULL)
             self.assertEqual(kw["env"]["GIT_TERMINAL_PROMPT"], "0")
             self.assertIn("BatchMode=yes", kw["env"]["GIT_SSH_COMMAND"])
+
+    def test_user_ssh_command_is_respected(self):
+        a = self.clone("a")
+        g(a.root / "work", "config", "core.sshCommand", "ssh -i /nonexistent")
+        calls = []
+        real = subprocess.run
+        def spy(*args, **kw):
+            if args[0][2].endswith("work"):
+                calls.append(kw)
+            return real(*args, **kw)
+        with mock.patch("lrdmem.sync.subprocess.run", spy), mock.patch.dict(os.environ):
+            os.environ.pop("GIT_SSH_COMMAND", None)
+            sync(a)
+        pulled = [kw for kw in calls if "env" in kw]
+        self.assertTrue(pulled)
+        self.assertTrue(all("GIT_SSH_COMMAND" not in kw["env"] for kw in pulled))
+
+    def test_scoped_sync_with_dirty_other_env_does_not_pull(self):
+        root = self.tmp / "s"
+        write(root / "e1" / "x.md", "x")
+        write(root / "e2" / "y.md", "y")
+        g(root, "init", "-q")
+        g(root, "add", "-A")
+        g(root, "commit", "-qm", "init")
+        g(root, "remote", "add", "origin", str(self.remote))
+        write(root / "e1" / "x.md", "x2")
+        write(root / "e2" / "y.md", "y2")
+        [res] = sync(Store(root), "e1")
+        self.assertEqual(res.error, "committed e1; not pulled/pushed: uncommitted changes outside e1")
+        self.assertTrue(res.committed and not res.pushed)
+        self.assertEqual((root / "e2" / "y.md").read_text(), "y2")
 
     def test_exclude_is_literal_and_nested_repo_not_gitlink(self):
         root = self.tmp / "s"

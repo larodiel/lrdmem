@@ -27,9 +27,19 @@ class _GitError(Exception):
     pass
 
 
+def _configured_ssh(repo: Path) -> bool:
+    try:
+        r = subprocess.run(["git", "-C", str(repo), "config", "--get", "core.sshCommand"], capture_output=True,
+                           text=True, timeout=10, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return bool(r.stdout.strip())
+
+
 def _git(repo: Path, *args: str, timeout: float = 30) -> str:
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
-    env.setdefault("GIT_SSH_COMMAND", "ssh -o BatchMode=yes")  # never block on a passphrase prompt
+    if not (env.get("GIT_SSH_COMMAND") or env.get("GIT_SSH")) and not _configured_ssh(repo):
+        env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes"  # never block on a passphrase prompt
     try:
         r = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=timeout,
                            stdin=subprocess.DEVNULL, env=env)
@@ -121,6 +131,10 @@ def _sync_one(label: str, repo: Path, include: str, excludes: list[str], message
             committed = True
         remotes = _git(repo, "remote").split()
         if remotes:
+            if _git(repo, "status", "--porcelain", "--untracked-files=no"):
+                done = f"committed {label}; " if committed else ""
+                return SyncResult(label, committed, False,
+                                  f"{done}not pulled/pushed: uncommitted changes outside {label}")
             err = _pull(repo, label)
             if err:
                 return SyncResult(label, committed, False, err)
@@ -151,7 +165,7 @@ def sync(store: Store, env: str | None = None, message: str | None = None) -> li
 
 
 def pull(store: Store, env: str | None = None) -> str | None:
-    """Pull --rebase --autostash every repo that has a remote (10 s each); an error string or None."""
+    """Pull --rebase (never autostash; dirty repos are skipped) every repo that has a remote (10 s each); an error string or None."""
     errors = []
     for label, top, _ in _targets(store, env):
         if top is None:
