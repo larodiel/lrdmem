@@ -10,7 +10,8 @@ from lrdmem.store import Context, Memory, Store, store_root
 
 
 def _out(text: str = "") -> None:
-    print(printable(text))
+    for line in text.splitlines() or [""]:
+        print(printable(line))
 
 
 def _rel(store: Store, item: Memory | Context) -> str:
@@ -28,8 +29,8 @@ def _context_line(c: Context) -> str:
 def _find(store: Store, g: Graph, args) -> int:
     for item in g.find(args.term, args.env):
         if isinstance(item, Memory):
-            _out(f"{item.kind} {_rel(store, item)} ({g.strength(item.slug, item.env)}) — {item.description}")
-            rel = g.related(item.slug, item.env)
+            _out(f"{item.kind} {_rel(store, item)} ({g.strength(item)}) — {item.description}")
+            rel = g.related(item)
             if rel:
                 _out(f"  related: {', '.join(rel)}")
         else:
@@ -57,9 +58,9 @@ def _show(store: Store, g: Graph, args) -> int:
     _out(m.description)
     _out(m.body.strip())
     _out("Contexts:")
-    for c in g.contexts_of(m.slug, m.env):
+    for c in g.contexts_of(m):
         _out(f"  {_context_line(c)}")
-    _out(f"Related: {', '.join(g.related(m.slug, m.env))}")
+    _out(f"Related: {', '.join(g.related(m))}")
     return 0
 
 
@@ -67,7 +68,7 @@ def _why(store: Store, g: Graph, args) -> int:
     m = _pick(store, g, args)
     if isinstance(m, int):
         return m
-    for c in g.contexts_of(m.slug, m.env):
+    for c in g.contexts_of(m):
         _out(_context_line(c))
         _out(c.body.strip())
         _out()
@@ -76,7 +77,7 @@ def _why(store: Store, g: Graph, args) -> int:
 
 def _hot(store: Store, g: Graph, args) -> int:
     for m, n in g.hot(args.min):
-        _out(f"{m.slug}  {n}" + ("  [candidate: obligation]" if m.kind == "pattern" else ""))
+        _out(f"{_rel(store, m)}  {n}" + ("  [candidate: obligation]" if m.kind == "pattern" else ""))
     return 0
 
 

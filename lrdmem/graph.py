@@ -55,19 +55,21 @@ class Graph:
             raise AmbiguousSlug(slug, found)
         return found[0] if found else None
 
-    def _key(self, slug: str, env: str | None) -> _Key | None:
+    def _key(self, slug: str | Memory, env: str | None) -> _Key | None:
+        if isinstance(slug, Memory):  # already resolved: never re-resolve by slug
+            return (slug.env, slug.slug)
         m = self.resolve(slug, env)
         return (m.env, m.slug) if m else None
 
-    def strength(self, slug: str, env: str | None = None) -> int:
+    def strength(self, slug: str | Memory, env: str | None = None) -> int:
         """Number of contexts linking the memory."""
         return len(self._contexts.get(self._key(slug, env), []))
 
-    def contexts_of(self, slug: str, env: str | None = None) -> list[Context]:
+    def contexts_of(self, slug: str | Memory, env: str | None = None) -> list[Context]:
         """Contexts linking the memory, oldest first."""
         return list(self._contexts.get(self._key(slug, env), []))
 
-    def related(self, slug: str, env: str | None = None) -> list[str]:
+    def related(self, slug: str | Memory, env: str | None = None) -> list[str]:
         """Slugs linked to or from the memory, superseding/superseded by it, or sharing a context."""
         return sorted({s for _, s in self._edges.get(self._key(slug, env), set())})
 

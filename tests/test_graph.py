@@ -1,4 +1,5 @@
 import io
+import os
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -6,7 +7,7 @@ from pathlib import Path
 
 from lrdmem.cli import main
 from lrdmem.graph import AmbiguousSlug, Graph
-from lrdmem.store import Store
+from lrdmem.store import Context, Store
 from tests.fixtures import make_store
 
 
@@ -21,7 +22,7 @@ def _ctx(i, date, mems):
 
 def _files():
     f = {
-        "work/app/phpcs.md": _mem("phpcs", "Run phpcs. See [[style]]."),
+        "work/app/phpcs.md": _mem("phpcs", "Run phpcs.\nSecond line. See [[style]]."),
         "work/app/other.md": _mem("other"),
         "work/app/lonely.md": _mem("lonely"),
         "_global/style.md": _mem("style"),
@@ -57,7 +58,7 @@ class GraphTest(unittest.TestCase):
     def test_find_body_match(self):
         hits = self.g.find("PHPCS")
         self.assertEqual([getattr(h, "slug", None) for h in hits][:2], ["phpcs", "phpcs"])
-        self.assertTrue(any(h.__class__.__name__ == "Context" for h in self.g.find("first line of c1")))
+        self.assertTrue(any(isinstance(h, Context) for h in self.g.find("first line of c1")))
 
     def test_ambiguous(self):
         with self.assertRaises(AmbiguousSlug):
@@ -66,11 +67,10 @@ class GraphTest(unittest.TestCase):
 
 
 class CliReadTest(unittest.TestCase):
-    def run_cli(self, *argv):
+    def run_cli(self, *argv, files=None):
         t = tempfile.TemporaryDirectory()
         self.addCleanup(t.cleanup)
-        root = make_store(Path(t.name), _files())
-        import os
+        root = make_store(Path(t.name), files or _files())
         os.environ["LRDMEM_STORE"] = str(root)
         self.addCleanup(os.environ.pop, "LRDMEM_STORE", None)
         out, err = io.StringIO(), io.StringIO()
@@ -87,12 +87,12 @@ class CliReadTest(unittest.TestCase):
     def test_show_and_why(self):
         code, out, _ = self.run_cli("show", "phpcs", "--env", "work")
         self.assertEqual(code, 0)
-        self.assertIn("Run phpcs.", out)
+        self.assertIn("Run phpcs.\nSecond line.", out)
         self.assertIn("Contexts:", out)
         self.assertIn("2026-01-01 claude chat — first line of c1", out)
-        code, out, _ = self.run_cli("why", "phpcs", "--env", "work")
+        _, out, _ = self.run_cli("why", "phpcs", "--env", "work")
         self.assertLess(out.index("2026-01-01"), out.index("2026-03-01"))
-        self.assertIn("more", out)
+        self.assertIn("first line of c1\nmore", out)
 
     def test_ambiguous_and_unknown(self):
         code, _, err = self.run_cli("show", "phpcs")
@@ -103,7 +103,23 @@ class CliReadTest(unittest.TestCase):
 
     def test_hot(self):
         code, out, _ = self.run_cli("hot")
-        self.assertEqual(out.strip(), "phpcs  3  [candidate: obligation]")
+        self.assertEqual(code, 0)
+        self.assertEqual(out.strip(), "work/app/phpcs  3  [candidate: obligation]")
+        code, out, _ = self.run_cli("hot", "--min", "2")
+        self.assertNotIn("other", out)  # 1 context
+        self.assertEqual(self.run_cli("hot", "--min", "4")[1], "")
+
+    def test_global_and_env_same_slug(self):
+        files = {"_global/style.md": _mem("style", "global style"), "work/app/style.md": _mem("style", "app style"),
+                 "work/app/contexts/2026-01-01-c.md": _ctx("c", "2026-01-01", ["style"])}
+        code, out, _ = self.run_cli("find", "style", files=files)
+        self.assertEqual(code, 0)
+        self.assertIn("_global/style (0)", out)
+        self.assertIn("work/app/style (1)", out)
+        code, out, _ = self.run_cli("show", "style", "--env", "home", files=files)
+        self.assertEqual((code, "global style" in out), (0, True))
+        code, out, _ = self.run_cli("why", "style", "--env", "work", files=files)
+        self.assertEqual((code, "first line of c" in out), (0, True))
 
 
 if __name__ == "__main__":
