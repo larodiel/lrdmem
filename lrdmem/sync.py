@@ -28,35 +28,52 @@ class _GitError(Exception):
     pass
 
 
+_HARDEN = ["-c", "safe.bareRepository=explicit", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null"]
+_AUTO = object()
+
+
+def _run(repo: Path, args: tuple, env: dict, ceiling, **kw) -> subprocess.CompletedProcess:
+    """The one place git runs on store content: -C the trusted repo, no fsmonitor/hooks/bare discovery."""
+    env = {**env, "GIT_CONFIG_NOSYSTEM": "1"}
+    ceiling = repo.parent if ceiling is _AUTO else ceiling
+    if ceiling is not None:
+        env["GIT_CEILING_DIRECTORIES"] = str(ceiling)
+    return subprocess.run(["git", *_HARDEN, "-C", str(repo), *args], stdin=subprocess.DEVNULL, env=env, **kw)
+
+
 def _configured_ssh(repo: Path) -> bool:
     try:
-        r = subprocess.run(["git", "-C", str(repo), "config", "--get", "core.sshCommand"], capture_output=True,
-                           text=True, timeout=10, stdin=subprocess.DEVNULL)
+        r = _run(repo, ("config", "--get", "core.sshCommand"), os.environ.copy(), _AUTO, capture_output=True,
+                 text=True, timeout=10)
     except (OSError, subprocess.TimeoutExpired):
         return False
     return bool(r.stdout.strip())
 
 
-def _git(repo: Path, *args: str, timeout: float = 30) -> str:
+def _git(repo: Path, *args: str, timeout: float = 30, ceiling=_AUTO, binary: bool = False):
+    """Run hardened git in a trusted repo dir; stripped text, or raw bytes with binary. ceiling: dir git must not climb into."""
     env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
     if not (env.get("GIT_SSH_COMMAND") or env.get("GIT_SSH")) and not _configured_ssh(repo):
         env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes -o ConnectTimeout=3"  # never block on a prompt or a dead host
     try:
-        r = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=timeout,
-                           stdin=subprocess.DEVNULL, env=env)
+        r = _run(repo, args, env, ceiling, capture_output=True, text=not binary, timeout=timeout)
     except subprocess.TimeoutExpired:
         raise _GitError(f"git {args[0]} timed out") from None
     except OSError as e:
         raise _GitError(str(e)) from None
     if r.returncode:
-        raise _GitError((r.stderr or r.stdout).strip() or f"git {args[0]} failed")
-    return r.stdout.strip()
+        err = r.stderr.decode(errors="replace") if binary else r.stderr
+        raise _GitError(err.strip() or f"git {args[0]} failed")
+    return r.stdout if binary else r.stdout.strip()
 
 
-def toplevel(path: Path) -> Path | None:
-    """Resolved git toplevel of path, or None when path is not inside a git repository."""
+def toplevel(path: Path, ceiling: Path | None = None) -> Path | None:
+    """Resolved git toplevel of path, or None when path is not inside a git repository.
+
+    ceiling: directory git must not climb into (pass the store root's parent when path is inside a store).
+    """
     try:
-        return Path(_git(path, "rev-parse", "--show-toplevel")).resolve()
+        return Path(_git(path, "rev-parse", "--show-toplevel", ceiling=ceiling)).resolve()
     except _GitError:
         return None
 
@@ -77,7 +94,7 @@ def _targets(store: Store, env: str | None) -> list[tuple[str, Path | None, Path
         if name is not None and not path.is_dir():
             out.append((name, None, path))
             continue
-        top = toplevel(path)
+        top = toplevel(path, store.root.parent)
         # an env that is not its own repo is only synced as part of the store root repo
         if top is None or (top != path.resolve() and top != root):
             if name is not None:
@@ -179,7 +196,7 @@ def sync(store: Store, env: str | None = None, message: str | None = None,
         # path makes `git add` fail, and ignored envs are not staged anyway
         include = path.resolve().relative_to(top).as_posix()
         excludes = [n for n in store.environments() if include == "." and top == store.root.resolve()
-                    and toplevel(store.root / n) != top and not _ignored(top, n)]
+                    and toplevel(store.root / n, store.root.parent) != top and not _ignored(top, n)]
         results.append(_sync_one(label, top, include, excludes, message, skip_idle))
     return results
 

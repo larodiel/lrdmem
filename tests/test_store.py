@@ -3,6 +3,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from lrdmem.store import (SUPPORTED_FORMAT, AmbiguousRepo, Context, Edge, Experience, Memory, QueueItem, Revision,
                           Store, StoreFormatError, repo_key, resolve, store_root)
@@ -250,6 +251,32 @@ class V2StoreTest(unittest.TestCase):
         (s.root / ".lrdmem-format").write_text("junk")
         with self.assertRaises(StoreFormatError):
             s.format()
+
+    def test_kind_defaults_to_correction_only_for_contexts(self):
+        s = self.store({"work/app/experiences/x.md": "---\nid: x\n---\n", "work/app/contexts/c.md": "---\nid: c\n---\n"})
+        self.assertEqual([e.kind for e in s.experiences()], ["", "correction"])
+
+    def test_stored_confidence_is_ignored(self):
+        s = self.store({"work/app/a.md": _v2(top="confidence: 0.9\npriority: 3\n"),
+                        "work/app/edges/e.md": "---\nid: e\nconfidence: 0.2\n---\n"})
+        self.assertFalse(hasattr(s.memories()[0], "confidence"))
+        self.assertFalse(hasattr(s.edges()[0], "confidence"))
+
+    def test_format_marker_garbage_and_fallbacks(self):
+        s = self.store({"work/app/a.md": _mem()})
+        for bad in ("0", "-1", "2_0", "+2", "", "1.5"):
+            (s.root / ".lrdmem-format").write_text(bad)
+            with self.assertRaises(StoreFormatError, msg=bad):
+                s.format()
+        (s.root / ".lrdmem-format").unlink()
+        (s.root / f".lrdmem-format.{os.getpid()}.tmp").write_text("stale")
+        s.ensure_format()
+        self.assertEqual(s.format(), 2)
+        (s.root / ".lrdmem-format").unlink()
+        with mock.patch("os.link", side_effect=OSError("no hardlinks")):
+            s.ensure_format()
+        self.assertEqual(s.format(), 2)
+        self.assertEqual([p.name for p in s.root.iterdir() if p.name.endswith(".tmp")], [])
 
     def test_format_marker_does_not_follow_symlink(self):
         s = self.store({"work/app/a.md": _mem()})

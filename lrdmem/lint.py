@@ -8,6 +8,7 @@ from datetime import date
 from pathlib import Path
 
 from lrdmem import model
+from lrdmem.sync import _git, _GitError, toplevel
 from lrdmem.frontmatter import split, unsupported
 from lrdmem.store import (FORMAT_FILE, IGNORED, SUBFOLDERS, SUPPORTED_FORMAT, Edge, Experience, Memory, QueueItem,
                           Revision, Store, StoreFormatError)
@@ -44,6 +45,14 @@ def _is_date(value) -> bool:
     return True
 
 
+_EXTERNAL = ("feedback:", "http://", "https://")  # evidence refs outside the store
+_COMPUTED = ("confidence", "priority")
+
+
+def _computed(*maps: dict) -> list[str]:
+    return [f"{k} is computed on read; remove this field" for m in maps for k in _COMPUTED if k in m]
+
+
 def _is_moment(value) -> bool:
     """YYYY-MM-DD, optionally followed by a T... time."""
     return isinstance(value, str) and _is_date(value[:10]) and (len(value) == 10 or value[10] == "T")
@@ -69,7 +78,7 @@ def _evidence(store: Store, data: dict, env: str | None) -> list[str]:
         except ValueError as err:
             out.append(f"invalid evidence item: {err}")
             continue
-        if ":" not in ev.ref and not _resolves(store, ev.ref, env):  # refs like feedback:<id> or URLs are external
+        if not ev.ref.startswith(_EXTERNAL) and not _resolves(store, ev.ref, env):
             out.append(f"evidence ref '{ev.ref}' does not resolve in its environment or _global")
     return out
 
@@ -111,7 +120,7 @@ def _memory(m: Memory, text: str, known: set[str], store: Store) -> list[str]:
         out.append(f"metadata.state must be one of {list(model.STATES)}")
     out += [f"metadata.{k} is not YYYY-MM-DD" for k in ("valid_from", "valid_until", "created")
             if meta.get(k) is not None and not _is_date(meta[k])]
-    out += _evidence(store, m.data, m.env)
+    out += _evidence(store, m.data, m.env) + _computed(m.data, meta)
     if not meta.get("author"):
         out.append("no metadata.author")
     if not _is_date(meta.get("updated")):
@@ -147,10 +156,16 @@ def _context(c: Experience, text: str, known: set[str], store: Store) -> list[st
     return out
 
 
+def _id(item, out: list[str]) -> None:
+    if not item.data.get("id"):
+        out.append("no id")
+    elif item.data["id"] != item.path.stem:
+        out.append(f"id '{item.data['id']}' is not '{item.path.stem}'")
+
+
 def _experience(x: Experience, text: str, known: set[str], store: Store) -> list[str]:
     out = []
-    if not x.data.get("id"):
-        out.append("no id")
+    _id(x, out)
     if not _is_moment(x.data.get("date")):
         out.append("date is not YYYY-MM-DD[THH:MM:SSZ]")
     if x.data.get("kind") not in model.EXPERIENCE_KINDS:
@@ -162,8 +177,7 @@ def _experience(x: Experience, text: str, known: set[str], store: Store) -> list
 
 def _edge(e: Edge, text: str, known: set[str], store: Store) -> list[str]:
     out = []
-    if not e.data.get("id"):
-        out.append("no id")
+    _id(e, out)
     for end in ("source", "target"):
         ref = getattr(e, end)
         if not ref:
@@ -180,13 +194,12 @@ def _edge(e: Edge, text: str, known: set[str], store: Store) -> list[str]:
                 raise ValueError
         except (TypeError, ValueError):
             out.append("weight is not a number")
-    return out + _evidence(store, e.data, e.env)
+    return out + _evidence(store, e.data, e.env) + _computed(e.data)
 
 
 def _revision(r: Revision, text: str, known: set[str], store: Store) -> list[str]:
     out = []
-    if not r.data.get("id"):
-        out.append("no id")
+    _id(r, out)
     if not r.target:
         out.append("no target")
     elif not _resolves(store, r.target, r.env):
@@ -205,8 +218,7 @@ def _revision(r: Revision, text: str, known: set[str], store: Store) -> list[str
 
 def _queue(q: QueueItem, text: str, known: set[str], store: Store) -> list[str]:
     out = []
-    if not q.data.get("id"):
-        out.append("no id")
+    _id(q, out)
     if not q.kind:
         out.append("no kind")
     if not q.subjects:
@@ -223,18 +235,25 @@ _ENTRIES = {"contexts": (Experience, _context), "experiences": (Experience, _exp
 assert set(_ENTRIES) == set(SUBFOLDERS)
 
 
-def _edited(path: Path) -> bool:
-    """True when the file differs from its first git commit; False when untracked or outside git."""
-    def git(*args):
-        return subprocess.run(["git", *args], cwd=path.parent, capture_output=True, timeout=15)
+def _edited(store: Store, path: Path, tops: dict) -> bool:
+    """True when the file differs from its first git commit; False when untracked or outside git.
+
+    Git runs only in the toplevel found from the trusted environment dir, never inside store content.
+    """
+    env = store.scope_of(path.parent.parent)[0]
+    if env not in tops:
+        base = store.root / env if env else store.root
+        tops[env] = toplevel(base, store.root.parent)
+    top = tops[env]
     try:
-        log = git("log", "--format=%H", "--follow", "--", path.name)
-        commits = log.stdout.decode().split()
-        if log.returncode or not commits:
+        rel = path.resolve().relative_to(top).as_posix() if top else None
+        if rel is None:
             return False
-        first = git("show", f"{commits[-1]}:./{path.name}")
-        return first.returncode == 0 and first.stdout != path.read_bytes()
-    except (OSError, subprocess.SubprocessError):
+        commits = _git(top, "log", "--format=%H", "--follow", "--", rel).split()
+        if not commits:
+            return False
+        return _git(top, "show", f"{commits[-1]}:{rel}", binary=True) != path.read_bytes()
+    except (OSError, ValueError, _GitError):
         return False
 
 
@@ -264,7 +283,7 @@ def lint(store: Store, env: str | None = None, git_checks: bool = False) -> list
         return [f"{store.root}: store not found"]
     if env and env not in store.environments():
         return [f"{env}: no such environment"]
-    problems = _marker(store)
+    problems, tops = _marker(store), {}
     for folder in store.folders(env):
         e, repo = store.scope_of(folder)
         known = stems.get(e, set()) | stems.get(None, set())
@@ -283,6 +302,8 @@ def lint(store: Store, env: str | None = None, git_checks: bool = False) -> list
                 continue
             if data is None:
                 problems.append(f"{where}: no frontmatter")
+                if has_secret(text):
+                    problems.append(f"{where}: looks like it holds a credential")
                 continue
             problems += [f"{where}:{n}: unsupported frontmatter syntax; use inline lists [a, b]"
                          for n in unsupported(text)]
@@ -290,6 +311,6 @@ def lint(store: Store, env: str | None = None, git_checks: bool = False) -> list
             problems += [f"{where}: {msg}" for msg in check(item, text, known, store)]
             if has_secret(text):
                 problems.append(f"{where}: looks like it holds a credential")
-            if git_checks and path.parent.name == "experiences" and _edited(path):
+            if git_checks and path.parent.name == "experiences" and _edited(store, path, tops):
                 problems.append(f"{where}: experience changed since its first commit (experiences are immutable)")
     return problems

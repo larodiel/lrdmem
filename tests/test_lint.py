@@ -270,6 +270,36 @@ class LintV2Test(unittest.TestCase):
         self.assertEqual(self.run_lint(files), [])
 
 
+class LintFixRound1Test(unittest.TestCase):
+    run_lint = LintTest.run_lint
+    has = LintTest.has
+
+    def test_stored_confidence_and_priority_are_problems(self):
+        for field in ("confidence", "priority"):
+            self.has(v2files(**{"work/app/a.md": mem(extra=f"{field}: 0.9\n")}), "computed on read; remove this field")
+            self.has(v2files(**{"work/app/a.md": mem(meta=f"  {field}: 0.9\n")}), "computed on read; remove this field")
+            self.has(v2files(**{EDGE: _edge(**{field: "0.4"})}), "computed on read; remove this field")
+
+    def test_id_must_equal_stem(self):
+        self.has(v2files(**{EXP: _exp(id="other")}), "id 'other' is not '2026-10-29-x'")
+        self.has(v2files(**{EDGE: _edge(id="zz")}), "id 'zz' is not 'e1'")
+        self.assertEqual(self.run_lint(v2files(**{"work/app/contexts/2026-01-02-x.md": CTX})), [])  # legacy: id free
+
+    def test_external_evidence_schemes_only(self):
+        def ev(ref):
+            return mem(extra=f"evidence: [{{ref: {ref}, kind: supports, weight: 1}}]\n")
+        for ok in ("feedback:f1", "https://x.io/a", "http://x.io/a"):
+            self.assertEqual(self.run_lint(v2files(**{"work/app/a.md": ev(ok)})), [], ok)
+        self.has(v2files(**{"work/app/a.md": ev("ftp:x")}), "does not resolve")
+
+    def test_secret_in_file_without_frontmatter(self):
+        self.has(v2files(**{"work/app/queue/q.md": "ghp_" + "a" * 36 + "\n"}), "looks like it holds a credential")
+
+    def test_bad_markers(self):
+        for bad in ("0", "-1", "2_0", "+2", " ", "x"):
+            self.has(v2files(**{".lrdmem-format": bad}), ".lrdmem-format")
+
+
 class LintGitTest(unittest.TestCase):
     ENV = {"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1", "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
@@ -295,6 +325,24 @@ class LintGitTest(unittest.TestCase):
                 self.git(work, "add", "-A")
                 self.git(work, "commit", "-qm", "edit")
                 self.assertEqual(len(lint(Store(root), git_checks=True)), 1)
+
+    def test_planted_repo_inside_experiences_is_never_consulted(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = make_store(Path(t), v2files())
+            marker = Path(t) / "pwned"
+            exp_dir = root / "work/app/experiences"
+            with mock.patch.dict(os.environ, self.ENV):
+                self.git(root / "work", "init", "-q")  # real repo; the experience is untracked there
+                planted = Path(t) / "planted"
+                planted.mkdir()
+                self.git(planted, "init", "-q")
+                (planted / EXP.rsplit("/", 1)[1]).write_text("different\n")
+                self.git(planted, "add", "-A")
+                self.git(planted, "commit", "-qm", "x")
+                self.git(planted, "config", "core.fsmonitor", f"touch {marker}")
+                (planted / ".git").rename(exp_dir / ".git")
+                self.assertEqual(lint(Store(root), git_checks=True), [])
+            self.assertFalse(marker.exists())
 
     def test_untracked_or_outside_git_is_skipped(self):
         with tempfile.TemporaryDirectory() as t:

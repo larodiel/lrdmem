@@ -177,8 +177,8 @@ class Experience(_Entry):
 
     @property
     def kind(self) -> str:
-        """The experience kind; legacy contexts have none and are corrections."""
-        return _str(self.data.get("kind")) or "correction"
+        """The experience kind; only a legacy context (contexts/) may omit it and is then a correction."""
+        return _str(self.data.get("kind")) or ("correction" if self.path.parent.name == "contexts" else "")
 
     @property
     def memories(self) -> list[str]:
@@ -446,11 +446,14 @@ class Store:
         if marker.is_symlink():
             raise StoreFormatError(f"{marker} is a symlink")
         try:
-            return int(marker.read_text(encoding="utf-8").strip())
+            text = marker.read_text(encoding="utf-8").strip()
         except FileNotFoundError:
             return 1
         except (OSError, ValueError) as err:
-            raise StoreFormatError(f"{marker} is not a format number ({err.__class__.__name__})") from err
+            raise StoreFormatError(f"{marker} is unreadable ({err.__class__.__name__})") from err
+        if not re.fullmatch(r"[1-9][0-9]*", text):
+            raise StoreFormatError(f"{marker} must hold a positive whole number")
+        return int(text)
 
     def ensure_format(self) -> None:
         """Write the marker if absent; raise StoreFormatError when the store is newer than SUPPORTED_FORMAT."""
@@ -461,8 +464,13 @@ class Store:
         marker = self.root / FORMAT_FILE
         if os.path.lexists(marker):
             return
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
         tmp = self.root / f"{FORMAT_FILE}.{os.getpid()}.tmp"
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+        try:
+            os.unlink(tmp)  # stale leftover of a crashed run; unlink never follows a symlink
+        except FileNotFoundError:
+            pass
+        fd = os.open(tmp, flags, 0o644)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 f.write(f"{SUPPORTED_FORMAT}\n")
@@ -470,6 +478,13 @@ class Store:
                 os.link(tmp, marker)  # atomic create-if-absent; never follows a symlink at marker
             except FileExistsError:
                 pass
+            except OSError:  # filesystem without hard links: exclusive create in place
+                try:
+                    fd = os.open(marker, flags, 0o644)
+                except FileExistsError:
+                    return
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    f.write(f"{SUPPORTED_FORMAT}\n")
         finally:
             os.unlink(tmp)
 

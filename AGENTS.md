@@ -49,6 +49,12 @@ actionlint .github/workflows/*.yml                       # after editing workflo
   public API.
 - **Don't commit, push, tag or open PRs unless the human asks.**
 
+## Reserved names
+
+Repo folders named `contexts`, `experiences`, `edges`, `revisions` or `queue` are reserved: inside a scope folder
+they hold v2 entities, and the store never treats them as repos. All git calls on store content go through
+`sync._git`/`toplevel` (hardened, run in the trusted env toplevel), never with a cwd inside store content.
+
 ## Security invariants
 
 Changes must keep all of these true. A change that weakens one needs an explicit decision from the maintainer.

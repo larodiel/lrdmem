@@ -184,7 +184,7 @@ class SyncTest(unittest.TestCase):
         with mock.patch("lrdmem.sync.subprocess.run", spy):
             sync(a)
         self.assertTrue(calls)
-        for kw in (k for k in calls if "env" in k):
+        for kw in (k for k in calls if "GIT_TERMINAL_PROMPT" in k["env"]):  # all but the core.sshCommand probe
             self.assertEqual(kw["stdin"], subprocess.DEVNULL)
             self.assertEqual(kw["env"]["GIT_TERMINAL_PROMPT"], "0")
             self.assertEqual(kw["env"]["GIT_SSH_COMMAND"], "ssh -o BatchMode=yes -o ConnectTimeout=3")
@@ -195,13 +195,13 @@ class SyncTest(unittest.TestCase):
         calls = []
         real = subprocess.run
         def spy(*args, **kw):
-            if args[0][2].endswith("work"):
+            if args[0][args[0].index("-C") + 1].endswith("work"):
                 calls.append(kw)
             return real(*args, **kw)
         with mock.patch("lrdmem.sync.subprocess.run", spy), mock.patch.dict(os.environ):
             os.environ.pop("GIT_SSH_COMMAND", None)
             sync(a)
-        pulled = [kw for kw in calls if "env" in kw]
+        pulled = [kw for kw in calls if "GIT_TERMINAL_PROMPT" in kw["env"]]
         self.assertTrue(pulled)
         self.assertTrue(all("GIT_SSH_COMMAND" not in kw["env"] for kw in pulled))
 
@@ -272,6 +272,32 @@ class SyncTest(unittest.TestCase):
         [res] = sync(a, "work", skip_idle=True)
         self.assertTrue(res.committed)
         self.assertIn("pull failed", res.error)
+
+    def test_planted_repo_in_store_content_is_never_run(self):
+        store = self.clone("a")
+        marker = self.tmp / "pwned"
+        exp = store.root / "work/app/experiences"
+        exp.mkdir(parents=True)
+        g(exp, "init", "--bare", "-q", ".")
+        with (exp / "config").open("a") as f:
+            f.write(f"[core]\n\tfsmonitor = touch {marker}\n")
+        write(exp / "x.md", "---\nid: x\n---\n")
+        sync(store)
+        from lrdmem.lint import lint
+        lint(store, git_checks=True)
+        self.assertFalse(marker.exists())
+
+    def test_git_calls_are_hardened(self):
+        from lrdmem import sync as sync_mod
+        with mock.patch("subprocess.run") as run:
+            run.return_value = mock.Mock(returncode=0, stdout="x", stderr="")
+            sync_mod._git(self.tmp, "status")
+        argv = run.call_args_list[-1].args[0]
+        for opt in ("safe.bareRepository=explicit", "core.fsmonitor=false", "core.hooksPath=/dev/null"):
+            self.assertIn(opt, argv)
+        env = run.call_args_list[-1].kwargs["env"]
+        self.assertEqual(env["GIT_CEILING_DIRECTORIES"], str(self.tmp.parent))
+        self.assertEqual(env["GIT_CONFIG_NOSYSTEM"], "1")
 
     def test_toplevel_is_public(self):
         root = self.tmp / "s"
