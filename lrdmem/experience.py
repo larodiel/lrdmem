@@ -5,7 +5,6 @@ There is deliberately no function to edit one; history is only ever added to.
 
 import hashlib
 import re
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -24,7 +23,8 @@ class Refused(write.Refused):
 
 def _slug(text: str) -> str:
     words = re.sub(r"[^a-z0-9]+", " ", text.lower()).split()[:6]
-    return "-".join(words)[:40].strip("-") or "experience"
+    slug = re.sub(r"(^|-)req-[0-9a-f]{16}$", "", "-".join(words)[:40].strip("-")).strip("-")
+    return slug or "experience"
 
 
 def add(store: Store, cwd: Path, *, kind: str, agent: str, text: str, scope: str = "repo", files=(),
@@ -59,10 +59,10 @@ def add(store: Store, cwd: Path, *, kind: str, agent: str, text: str, scope: str
     except (write.Refused, LearnRefused) as e:
         raise Refused(str(e)) from None
     exp = folder / "experiences"
-    rid = hashlib.sha1(request_id.encode()).hexdigest()[:12] if request_id else ""
+    rid = hashlib.sha1(request_id.encode()).hexdigest()[:16] if request_id else ""
     if rid:
         for e in store.experiences():
-            if e.path.parent == exp and (e.request_id == request_id or e.path.stem.endswith(f"-req-{rid}")):
+            if e.path.parent == exp and e.request_id == request_id and e.kind and e.date:
                 return e, False
     when = (when or datetime.now(timezone.utc)).astimezone(timezone.utc)
     day = when.strftime("%Y-%m-%d")
@@ -89,8 +89,8 @@ def add(store: Store, cwd: Path, *, kind: str, agent: str, text: str, scope: str
     except (write.Refused, StoreFormatError, OSError) as e:
         raise Refused(str(e)) from None
     ref = path.relative_to(store.root).with_suffix("").as_posix()
-    for _ in range(50):  # the winner of a race may still be writing the file the loser reads back
-        if (node := store.node(ref)) is not None:
-            return node, created
-        time.sleep(0.02)
-    raise Refused(f"{ref} exists but could not be read")
+    node = store.node(ref)
+    if not created and not (isinstance(node, Experience) and node.kind and node.date
+                            and node.request_id == request_id):
+        raise Refused(f"{ref} exists but is not the experience for this request_id")
+    return node, created

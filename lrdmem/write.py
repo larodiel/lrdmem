@@ -73,10 +73,37 @@ def target(store: Store, scope_folder: Path, rel: str) -> Path:
 
 
 def create(path: Path, text: str) -> bool:
-    """Create path with text (O_EXCL|O_NOFOLLOW); False when it already exists, Refused on a secret."""
+    """Create path with text, complete the moment it becomes visible; False when it already exists.
+
+    The text goes to a hidden temp file in the same folder (O_EXCL|O_NOFOLLOW), is fsynced and hard-linked to path
+    (which fails if path exists, a dangling symlink included); readers never see an empty or partial file and a crash
+    leaves no claim on the name. Without hard links it falls back to a direct O_EXCL|O_NOFOLLOW write.
+    Refused on a secret.
+    """
     guard(text)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{os.urandom(4).hex()}.tmp")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
     try:
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+        with os.fdopen(os.open(tmp, flags, 0o644), "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.link(tmp, path)
+            return True
+        except FileExistsError:
+            return False
+        except OSError:
+            pass  # ponytail: no hard links on this filesystem; the direct write below can show a partial file
+    except OSError:
+        pass  # the temp file could not be made (read-only folder, ...): the direct write reports the real error
+    finally:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+    try:
+        fd = os.open(path, flags, 0o644)
     except FileExistsError:
         return False
     with os.fdopen(fd, "w", encoding="utf-8") as f:

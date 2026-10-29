@@ -1,5 +1,6 @@
 import os
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
@@ -65,6 +66,34 @@ class WriteTest(unittest.TestCase):
         (self.folder / "l.md").symlink_to(self.tmp / "target.md")
         self.assertFalse(write.create(self.folder / "l.md", "x"))  # O_EXCL: a (dangling) symlink counts as existing
         self.assertFalse((self.tmp / "target.md").exists())
+
+    def test_create_is_atomic_visible_and_leaves_no_temp(self):
+        text = "x" * 200_000
+        seen, stop = [], threading.Event()
+
+        def reader():
+            while not stop.is_set():
+                for p in self.folder.glob("a*.md"):
+                    seen.append(len(p.read_text()))
+        t = threading.Thread(target=reader)
+        t.start()
+        try:
+            for i in range(30):
+                write.create(self.folder / f"a{i}.md", text)
+        finally:
+            stop.set()
+            t.join()
+        self.assertTrue(seen)
+        self.assertEqual(set(seen), {len(text)})
+        self.assertEqual(sorted(p.name for p in self.folder.iterdir() if p.name.startswith(".")), [])
+
+    def test_create_falls_back_without_hard_links(self):
+        from unittest import mock
+        with mock.patch("os.link", side_effect=PermissionError):
+            self.assertTrue(write.create(self.folder / "f.md", "a"))
+            self.assertFalse(write.create(self.folder / "f.md", "b"))
+        self.assertEqual((self.folder / "f.md").read_text(), "a")
+        self.assertEqual([p.name for p in self.folder.iterdir() if p.name.startswith(".")], [])
 
     def test_unique_suffixes(self):
         stem = self.folder / "x"

@@ -41,7 +41,7 @@ class ExperienceTest(_Base):
     def test_writes_file_with_spec_fields(self):
         e, created = self.add(when=WHEN, files=["a.py"], ref="http://x/1", request_id="r1", device="mac")
         self.assertTrue(created)
-        path = self.root / "acme/web/experiences/2026-10-29-req-5573e39b6600.md"  # sha1("r1")[:12]
+        path = self.root / "acme/web/experiences/2026-10-29-req-5573e39b6600496d.md"  # sha1("r1")[:16]
         self.assertEqual(e.path, path)
         data = parse(path.read_text())
         self.assertEqual(data, {"id": path.stem, "date": "2026-10-29T14:03:00Z", "kind": "decision", "agent": "claude",
@@ -101,7 +101,7 @@ class ExperienceTest(_Base):
         [t.join() for t in ts]
         self.assertEqual(sorted(results), [False] * 7 + [True])
         self.assertEqual(len(self.files()), 1)
-        self.assertRegex(self.files()[0].name, r"^2026-10-29-req-[0-9a-f]{12}\.md$")
+        self.assertRegex(self.files()[0].name, r"^2026-10-29-req-[0-9a-f]{16}\.md$")
 
     def test_request_id_dedupes_across_days(self):
         a, _ = self.add(request_id="r9", when=WHEN)
@@ -122,6 +122,25 @@ class ExperienceTest(_Base):
         for f in ("a\x00b", "a\x1bb", "a\tb"):
             with self.subTest(f=f), self.assertRaises(experience.Refused):
                 self.add(files=[f])
+
+    def test_slug_cannot_forge_request_key(self):
+        import hashlib
+        rid = hashlib.sha1(b"victim").hexdigest()[:16]
+        forged, _ = self.add(text=f"note req {rid}", when=WHEN)
+        self.assertNotRegex(forged.id, r"req-[0-9a-f]{16}$")
+        (self.root / "acme/web/experiences" / f"2026-10-29-req-{rid}.md").write_text(
+            "---\nid: x\ndate: 2026-10-29T00:00:00Z\nkind: error\nagent: a\nrequest_id: other\n---\n\nb\n")
+        with self.assertRaises(experience.Refused):  # same name, different stored request_id: never "existing"
+            self.add(request_id="victim", when=WHEN)
+
+    def test_blank_file_does_not_claim_request_id(self):
+        import hashlib
+        rid = hashlib.sha1(b"q").hexdigest()[:16]
+        exp = self.root / "acme/web/experiences"
+        exp.mkdir()
+        (exp / f"2026-10-29-req-{rid}.md").write_text("")
+        with self.assertRaises(experience.Refused):  # name taken by a non-experience: refuse, never "existing"
+            self.add(request_id="q", when=WHEN)
 
     def test_experiences_dir_is_a_file(self):
         (self.root / "acme/web/experiences").write_text("x")
