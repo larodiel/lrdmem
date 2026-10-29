@@ -28,6 +28,7 @@ class HookInput:
     command: str | None = None
     prompt: str | None = None
     stop_active: bool = False
+    edit_time_stop: bool = False  # harness has no blocking Stop: stop checks run at post-edit, stop only syncs
 
 
 @dataclass
@@ -55,6 +56,20 @@ def repo_path(cwd: Path, path: str | None) -> str | None:
         return (cwd / path).resolve().relative_to(top).as_posix()
     except ValueError:
         return None
+
+
+def patch_path(patch: str) -> str | None:
+    """First file an apply_patch-format patch adds or updates (its `Move to` target when renamed); None if none."""
+    path = None
+    for line in patch.splitlines():
+        head, _, rest = line.partition(": ")
+        if head in ("*** Add File", "*** Update File", "*** Delete File"):
+            if path:
+                break
+            path = rest.strip() if head != "*** Delete File" else None
+        elif head == "*** Move to" and path:
+            path = rest.strip()
+    return path or None
 
 
 def _scope(inp: HookInput) -> _Scope | None:
@@ -117,7 +132,9 @@ def _post_edit(inp: HookInput, s: _Scope) -> HookOutput:
     if inp.path not in session.edited:
         session.edited.append(inp.path)
         session.save()
-    return HookOutput(_failures(run_checks(s.store, s.env, s.repo, root, "post-edit", [inp.path], s.cfg)))
+    ons = ("post-edit", "stop") if inp.edit_time_stop else ("post-edit",)
+    results = (run_checks(s.store, s.env, s.repo, root, on, [inp.path], s.cfg) for on in ons)
+    return HookOutput("\n".join(filter(None, map(_failures, results))))
 
 
 def _prompt(inp: HookInput, s: _Scope) -> HookOutput:
@@ -128,7 +145,7 @@ def _stop(inp: HookInput, s: _Scope) -> HookOutput:
     root = toplevel(inp.cwd)
     session = Session(inp.session_id)
     out = HookOutput()
-    if root and session.edited:
+    if root and session.edited and not inp.edit_time_stop:
         text = _failures(run_checks(s.store, s.env, s.repo, root, "stop", session.edited, s.cfg))
         if text and not inp.stop_active and session.stop_blocks < MAX_BLOCKS:
             session.stop_blocks += 1
@@ -164,9 +181,9 @@ def handle(inp: HookInput) -> HookOutput:
 
 def dispatch(phase: str, agent: str, stdin: str) -> str:
     """Parse harness JSON for phase, handle it and return the adapter's stdout text; "" on any error."""
-    from lrdmem.hooks import claude  # adapters import this module
+    from lrdmem.hooks import claude, codex, opencode  # adapters import this module
 
-    adapters = {"claude": claude}
+    adapters = {"claude": claude, "codex": codex, "opencode": opencode}
     try:
         adapter = adapters[agent]
         payload = json.loads(stdin or "{}")

@@ -1,0 +1,1 @@
+{"session_id": "s1", "transcript_path": "/tmp/t.jsonl", "cwd": "{cwd}", "hook_event_name": "UserPromptSubmit", "model": "gpt-5.5", "permission_mode": "default", "turn_id": "t1", "prompt": "no, use tabs"}

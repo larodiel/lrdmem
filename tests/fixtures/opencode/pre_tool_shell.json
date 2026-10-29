@@ -1,0 +1,1 @@
+{"session_id": "ses_1", "cwd": "{cwd}", "tool": "shell", "input": {"command": "composer install", "workdir": "{cwd}"}}

@@ -1,0 +1,1 @@
+{"session_id": "s1", "transcript_path": "/tmp/t.jsonl", "cwd": "{cwd}", "hook_event_name": "PreToolUse", "model": "gpt-5.5", "permission_mode": "default", "turn_id": "t1", "tool_name": "mcp__filesystem__read_file", "tool_use_id": "call_3", "tool_input": {"path": "{cwd}/src/a.php"}}

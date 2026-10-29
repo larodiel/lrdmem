@@ -7,3 +7,16 @@ pipx install lrdmem
 ```
 
 Author: Victor Larodiel. MIT licensed.
+
+## Harness support
+
+All three run the same handlers through `lrdmem hook <phase> --agent claude|codex|opencode`.
+
+- **Claude Code**: hooks in `~/.claude/settings.json`; `stop` checks block the Stop (at most twice per session).
+- **Codex CLI** (verified on 0.159.0): hooks in `~/.codex/hooks.json`, same payload and output JSON as Claude Code.
+  Edits arrive as `apply_patch`; lrdmem uses the patch's first added or updated file. `Stop` can block, so `stop`
+  checks behave as in Claude Code.
+- **OpenCode** (verified on v2.1.4): copy `lrdmem/hooks/opencode-plugin.js` to `~/.config/opencode/plugins/`.
+  Context goes into the system prompt (session start, prompts) or the tool result (pre/post tool). OpenCode has no
+  blocking stop, so `check.on: stop` obligations run after each edit, like `post-edit`; the end of a session
+  execution only syncs.

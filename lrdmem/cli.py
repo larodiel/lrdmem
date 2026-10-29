@@ -336,8 +336,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("env", nargs="?")
     p = sub.add_parser("hook", help="run a harness hook (JSON on stdin, harness JSON on stdout)")
     p.add_argument("phase", help="session-start, pre-tool, post-tool, prompt or stop")
-    p.add_argument("--agent", default="claude")
-    sub.add_parser("context", help="same as `hook session-start`").add_argument("--agent", default="claude")
+    p.add_argument("--agent", default="claude", help="claude, codex or opencode")
+    sub.add_parser("context", help="same as `hook session-start`").add_argument(
+        "--agent", default="claude", help="claude, codex or opencode")
     args = parser.parse_args(argv)
     if args.command in ("hook", "context"):
         return _hook(getattr(args, "phase", "session-start"), args.agent)

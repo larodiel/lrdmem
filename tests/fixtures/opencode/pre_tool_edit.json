@@ -1,0 +1,1 @@
+{"session_id": "ses_1", "cwd": "{cwd}", "tool": "edit", "input": {"path": "src/a.php", "oldString": "x", "newString": "y"}}

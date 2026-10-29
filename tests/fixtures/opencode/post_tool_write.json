@@ -1,0 +1,1 @@
+{"session_id": "ses_1", "cwd": "{cwd}", "tool": "write", "input": {"path": "{cwd}/src/a.php", "content": "y"}}

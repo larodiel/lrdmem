@@ -1,0 +1,1 @@
+{"session_id": "ses_1", "cwd": "{cwd}", "tool": "patch", "input": {"patchText": "*** Begin Patch\n*** Delete File: old.txt\n*** Update File: src/b.php\n*** Move to: src/a.php\n@@\n-x\n+y\n*** Add File: c.php\n+z\n*** End Patch"}}
