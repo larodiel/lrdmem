@@ -103,6 +103,13 @@ class LearnTest(unittest.TestCase):
         with self.assertRaises(LearnRefused):
             self.learn(memory="other-thing", env="acme", **dict(NEW, description="Entirely different words here"))
 
+    def test_newer_store_format_refused(self):
+        (self.root / ".lrdmem-format").write_text("3\n")
+        with self.assertRaises(LearnRefused) as cm:
+            self.learn(memory="spaces", **NEW)
+        self.assertIn("newer", str(cm.exception))
+        self.assertFalse((self.root / "acme/web/spaces.md").exists())
+
     def test_symlinks_refused(self):
         evil = self.tmp / "evil"
         evil.mkdir()

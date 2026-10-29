@@ -139,6 +139,37 @@ class LintTest(unittest.TestCase):
         self.assertTrue(has_secret("token = abcdefgh"))
         self.assertFalse(has_secret("hello"))
 
+    def test_v2_secret_patterns(self):
+        seg = "A1b2C3d4E5f6G7h8"  # built at runtime so the repo itself holds no token-shaped strings
+        hits = {
+            "jwt": "eyJ" + seg + ".eyJ" + seg + "." + seg,
+            "stripe live": "sk_" + "live_" + seg + "x",
+            "stripe test": "sk_" + "test_" + seg,
+            "stripe restricted": "rk_" + "live_" + seg,
+            "npm": "npm_" + "a" * 36,
+            "slack webhook": "https://hooks.slack.com/services/" + "T000/B000/" + seg,
+            "google oauth": "ya29." + seg + "-_xyz",
+            "bearer": "Authorization: Bearer " + seg,
+            "bearer lower": "authorization:bearer " + seg + ".x",
+        }
+        for name, text in hits.items():
+            with self.subTest(name):
+                self.assertTrue(has_secret(f"see {text} here"))
+        misses = {
+            "stripe publishable": "pk_" + "live_" + seg,
+            "stripe short": "sk_" + "live_" + "abc",
+            "eyJ alone": "the eyJ prefix marks base64 JSON",
+            "one jwt segment": "eyJ" + seg,
+            "npm short": "npm_" + "a" * 20,
+            "slack docs": "https://hooks.slack.com/services/",
+            "ya29 short": "ya29.abc",
+            "bearer word": "Authorization: Bearer token",
+            "bearer prose": "use a Bearer token in the Authorization header",
+        }
+        for name, text in misses.items():
+            with self.subTest(name):
+                self.assertFalse(has_secret(text))
+
     def test_broken_files_reported_and_lint_continues(self):
         files = clean(**{"work/app/b.md": "no frontmatter\n", "work/app/c.md": "---\nunterminated\n",
                          "work/app/a.md": mem("zz")})

@@ -1,21 +1,19 @@
 """Record a correction: a context (the incident) linked to a memory (the rule)."""
 
-import fcntl
-import os
 import re
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
-from lrdmem.frontmatter import dump, split
+from lrdmem import write
+from lrdmem.frontmatter import dump, parse
 from lrdmem.lint import KINDS, SOURCES, has_secret
-from lrdmem.store import AmbiguousRepo, Store, resolve
+from lrdmem.store import AmbiguousRepo, Store, StoreFormatError, resolve
 
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 _LINK = re.compile(r"\[\[([^\]]+)\]\]")
 _STOP = {"this", "that", "with", "from", "have", "when", "your", "what", "does", "into", "should", "never",
          "always", "using", "used", "about", "there", "their", "which", "would", "could", "than", "then"}
-_UPDATED = re.compile(r"^(\s+updated:\s*).*?(\r?)$")
 _RESERVED = {"memory", "readme", "contexts"}
 _SCOPES = ("repo", "env", "global")
 
@@ -56,10 +54,7 @@ def _folder(store: Store, cwd: Path, scope: str, env: str | None) -> tuple[Path,
     if not found:
         raise LearnRefused("this repository is not opted in to the store; use scope global or create its folder")
     e, repo = found
-    folder = store.root / e / ("_global" if scope == "env" else repo)
-    if not folder.resolve().is_relative_to((store.root / e).resolve()):  # env dirs may be symlinks; folders may not leave them
-        raise LearnRefused("target folder resolves outside its environment")
-    return folder, e
+    return store.root / e / ("_global" if scope == "env" else repo), e
 
 
 def _check_text(store: Store, fields: dict[str, str], scope: str, env: str | None, slug: str) -> None:
@@ -82,50 +77,15 @@ def _duplicates(store: Store, env: str | None, slug: str, description: str) -> l
             and len(mine & terms(m.slug.replace("-", " ") + " " + m.description)) >= 2]
 
 
-def _create(path: Path, text: str) -> bool:
-    try:
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(text)
-    except FileExistsError:
-        return False
-    return True
-
-
 def _touch(path: Path, today: str) -> None:
-    """Rewrite only the `updated:` line inside `metadata:`; anything else, or no such line, stays byte for byte."""
-    # ponytail: read-modify-write without a lock; a concurrent edit of the same memory can be lost.
-    with open(path, encoding="utf-8", newline="") as f:  # keep CRLF files CRLF
-        text = f.read()
-    if split(text)[0] is None:
+    """Refresh `updated:` inside `metadata:` when the memory has one; every other line stays byte for byte."""
+    try:
+        data = parse(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
         return
-    lines = text.split("\n")
-    in_meta = False
-    for i, line in enumerate(lines[1:], 1):
-        if line.rstrip("\r") == "---":
-            return  # end of the header: no updated line in metadata
-        if not line.strip():
-            continue
-        if line[:1] not in (" ", "\t"):
-            key, colon, rest = line.partition(":")
-            in_meta = bool(colon) and key.strip() == "metadata" and not rest.strip()
-        elif in_meta:
-            m = _UPDATED.match(line)
-            if m:
-                lines[i] = f"{m.group(1)}{today}{m.group(2)}"
-                with open(path, "w", encoding="utf-8", newline="") as f:
-                    f.write("\n".join(lines))
-                return
-
-
-def _index(folder: Path, line: str) -> None:
-    fd = os.open(folder / "MEMORY.md", os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o644)
-    with os.fdopen(fd, "a+", encoding="utf-8") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
-        f.seek(0)
-        text = f.read()
-        if line not in text.splitlines():
-            f.write(("" if not text or text.endswith("\n") else "\n") + line + "\n")
+    meta = data.get("metadata") if data else None
+    if isinstance(meta, dict) and "updated" in meta:
+        write.set_fields(path, {"updated": today})
 
 
 def learn(store: Store, cwd: Path, *, memory: str, mistake: str, correction: str, scope: str, agent: str,
@@ -154,10 +114,12 @@ def learn(store: Store, cwd: Path, *, memory: str, mistake: str, correction: str
     if any("\n" in v or "\r" in v for v in oneline.values()):
         raise LearnRefused("agent, device, pr, description, files and triggers must be single-line")
     folder, vis_env = _folder(store, cwd, scope, env)
-    path = folder / f"{memory}.md"
-    for guard in (path, folder / "contexts", folder / "MEMORY.md"):
-        if guard.is_symlink():
-            raise LearnRefused(f"{guard.name} is a symlink; refusing to write through it")
+    try:
+        path = write.target(store, folder, f"{memory}.md")
+        write.target(store, folder, "contexts")
+        write.target(store, folder, "MEMORY.md")
+    except (write.Refused, StoreFormatError) as e:
+        raise LearnRefused(str(e)) from None
     exists = path.exists()
     if not exists and not all(v and v.strip() for v in (description, body, why, how)):
         raise LearnRefused(f"memory '{memory}' does not exist in this scope; description, body, why and how "
@@ -172,31 +134,34 @@ def learn(store: Store, cwd: Path, *, memory: str, mistake: str, correction: str
     if dups and not new:
         raise LearnRefused("similar memories exist (use --new to override): " + ", ".join(dups), dups)
 
-    today = date.today().isoformat()
-    (folder / "contexts").mkdir(parents=True, exist_ok=True)
-    created = False
-    if not exists:
-        meta = {"type": "feedback", **({"kind": kind} if kind else {}), "author": agent, "updated": today}
-        triggers = {k: list(v) for k, v in (("paths", paths), ("commands", commands), ("repos", repos)) if v}
-        head = {"name": memory, "description": description, "metadata": meta,
-                **({"triggers": triggers} if triggers else {})}
-        text = f"{body.strip()}\n\n**Why:** {why.strip()}\n**How to apply:** {how.strip()}\n"
-        created = _create(path, dump(head) + "\n\n" + text)
-        if created:
-            _index(folder, f"- [{memory}]({memory}.md) — {description}")
-    if not created:
-        _touch(path, today)
+    try:  # the write layer re-checks secrets, scope and symlinks; a late refusal is still a LearnRefused
+        today = date.today().isoformat()
+        (folder / "contexts").mkdir(parents=True, exist_ok=True)
+        created = False
+        if not exists:
+            meta = {"type": "feedback", **({"kind": kind} if kind else {}), "author": agent, "updated": today}
+            triggers = {k: list(v) for k, v in (("paths", paths), ("commands", commands), ("repos", repos)) if v}
+            head = {"name": memory, "description": description, "metadata": meta,
+                    **({"triggers": triggers} if triggers else {})}
+            text = f"{body.strip()}\n\n**Why:** {why.strip()}\n**How to apply:** {how.strip()}\n"
+            created = write.create(path, dump(head) + "\n\n" + text)
+            if created:
+                write.index_line(folder, f"- [{memory}]({memory}.md) — {description}")
+        if not created:
+            _touch(path, today)
 
-    repo = store.scope_of(folder)[1]
-    data = {"id": "", "date": today, "agent": agent, "device": device, "repo": repo, "files": list(files),
-            "source": source, "pr": pr, "memories": [memory]}
-    text_body = f"\n**Mistake:** {mistake.strip()}\n\n**Correction:** {correction.strip()}\n"
-    n = 1
-    while True:
-        cid = f"{today}-{memory}" + (f"-{n}" if n > 1 else "")
-        data["id"] = cid
-        head = dump({k: v for k, v in data.items() if v not in (None, "", [])})
-        ctx = folder / "contexts" / f"{cid}.md"
-        if _create(ctx, head + "\n" + text_body):
-            return LearnResult(ctx, path, created, dups)
-        n += 1
+        repo = store.scope_of(folder)[1]
+        data = {"id": "", "date": today, "agent": agent, "device": device, "repo": repo, "files": list(files),
+                "source": source, "pr": pr, "memories": [memory]}
+        text_body = f"\n**Mistake:** {mistake.strip()}\n\n**Correction:** {correction.strip()}\n"
+        n = 1
+        while True:
+            cid = f"{today}-{memory}" + (f"-{n}" if n > 1 else "")
+            data["id"] = cid
+            head = dump({k: v for k, v in data.items() if v not in (None, "", [])})
+            ctx = write.target(store, folder, f"contexts/{cid}.md")
+            if write.create(ctx, head + "\n" + text_body):
+                return LearnResult(ctx, path, created, dups)
+            n += 1
+    except write.Refused as e:
+        raise LearnRefused(str(e)) from None

@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from lrdmem import __version__, checks, config
+from lrdmem import __version__, checks, config, revision
 from lrdmem.export import to_dot, to_html, to_json
 from lrdmem.graph import AmbiguousSlug, Graph
 from lrdmem.hooks import HookInput, dispatch, handle
@@ -16,7 +16,8 @@ from lrdmem.lint import lint, printable
 from lrdmem.pr import learn_pr
 from lrdmem.session import Session
 from lrdmem.stale import stale
-from lrdmem.store import AmbiguousRepo, Context, Memory, Store, StoreNotConfigured, resolve, store_root
+from lrdmem.store import (AmbiguousRepo, Context, Memory, Store, StoreFormatError, StoreNotConfigured, resolve,
+                          store_root)
 from lrdmem.sync import sync
 from lrdmem.triggers import render, select
 
@@ -187,6 +188,16 @@ def _learn_pr(store: Store, g: Graph, args) -> int:
         _out(c["url"])
         note = f" (not stored: {c['note']})" if c.get("note") else ""
         _out(f"  {c['path'] + ': ' if c['path'] else ''}{next(iter(c['body'].splitlines()), '')}{note}")
+    return 0
+
+
+def _revert(store: Store, g: Graph, args) -> int:
+    try:
+        path = revision.revert(store, args.revision, args.agent)
+    except (ValueError, StoreFormatError, OSError) as e:
+        print(printable(str(e)), file=sys.stderr)
+        return 1
+    _out(path.relative_to(store.root).with_suffix("").as_posix())
     return 0
 
 
@@ -384,6 +395,10 @@ def _main(argv: list[str] | None) -> int:
     p.add_argument("--on", choices=["stop", "post-edit"], required=True)
     p.add_argument("--files", nargs="*", default=[])
     p.add_argument("--env")
+    p = sub.add_parser("revert", help="restore what a revision changed and record a revert revision")
+    p.set_defaults(fn=_revert)
+    p.add_argument("revision", help="revision id or store-relative ref")
+    p.add_argument("--agent", default="human", help="who reverts (recorded as the revision's by)")
     p = sub.add_parser("sync", help="commit and push the store (all environments, or one)")
     p.set_defaults(fn=_sync)
     p.add_argument("env", nargs="?")

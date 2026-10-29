@@ -21,6 +21,10 @@ SECRET = re.compile(
     r"sk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{30,}|github_pat_\w{30,}"
     r"|xox[abp]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35}|lin_api_\w{20,}"
     r"|-----BEGIN [A-Z ]*PRIVATE KEY-----"
+    r"|eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"  # JWT
+    r"|(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,}|npm_[A-Za-z0-9]{36}"  # Stripe secret/restricted (pk_ is public), npm
+    r"|hooks\.slack\.com/services/[A-Za-z0-9/]{20,}|ya29\.[A-Za-z0-9_-]{20,}"  # Slack webhook, Google OAuth
+    r"|(?i:authorization:\s*bearer\s+)[A-Za-z0-9._~+/-]{16,}"
     r"|(?i:password|passwd|api[_-]?key|secret|token)\s*[:=]\s*['\"]?[^\s'\"`<]{6,}"
 )
 ABS_PATH = re.compile(r"`((?:/Volumes|/Users|~)/[^`\s<>*]+)`")
