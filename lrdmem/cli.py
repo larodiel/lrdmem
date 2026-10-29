@@ -122,6 +122,13 @@ def _stale(store: Store, g: Graph, args) -> int:
     return 1 if found else 0
 
 
+def _positive(text: str) -> int:
+    n = int(text)
+    if n < 1:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return n
+
+
 def _associate(store: Store, g: Graph, args) -> int:
     try:
         scope = resolve(store, Path.cwd(), args.env)
@@ -415,7 +422,7 @@ def _main(argv: list[str] | None) -> int:
     p.add_argument("query", nargs="?", default="")
     p.add_argument("--file", action="append", default=[])
     p.add_argument("--command")
-    p.add_argument("--limit", type=int, default=20)
+    p.add_argument("--limit", type=_positive, default=20)
     p.add_argument("--json", action="store_true")
     p.add_argument("--env")
     p = sub.add_parser("for", help="print memories triggered by a file or command")

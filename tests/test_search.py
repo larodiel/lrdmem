@@ -83,6 +83,36 @@ class SearchTest(unittest.TestCase):
         self.assertEqual(self.refs(h), ["work/app/style"])
         self.assertEqual(h[0].signals, ["bm25: style", "entity style"])
 
+    def test_accents(self):
+        self.assertEqual([i for i, _, _ in bm25([("x", "Migração de dados")], "migracao")], ["x"])
+        self.assertEqual([i for i, _, _ in bm25([("x", "migracao")], "MIGRAÇÃO")], ["x"])
+
+    def test_entity_boundaries(self):
+        with tempfile.TemporaryDirectory() as t:
+            st = Store(make_store(Path(t), {"work/app/m.md": _mem("m", "d", "edit src/a.php now, also x")}))
+            self.assertEqual(len(candidates(st, "work", "app", files=["src/a.php"])), 1)
+            self.assertEqual(candidates(st, "work", "app", files=["rc/a.php", "a", "", "x.php"]), [])
+            self.assertEqual(candidates(st, "work", "app", files=[""], command=""), [])
+            self.assertEqual(len(candidates(st, "work", "app", files=["x"])), 1)
+
+    def test_scope_rules(self):
+        files = {
+            "work/app/ok.md": _mem("ok", "zeta", "zeta"),
+            "work/app/other.md": _mem("other", "zeta", "zeta", "  repos: [elsewhere]\n"),
+            "work/_global/w.md": _mem("w", "zeta", "zeta", "  repos: [app]\n"),
+            "work/_global/x.md": _mem("x", "zeta", "zeta", "  repos: [elsewhere]\n"),
+            "home/app/h.md": _mem("h", "zeta", "zeta"),
+            "work/app/edges/e.md": _edge("e", "work/app/ok", "home/app/h", "related_to"),
+        }
+        with tempfile.TemporaryDirectory() as t:
+            st = Store(make_store(Path(t), files))
+            hits = candidates(st, "work", "app", query="zeta")
+            self.assertEqual(sorted(self.refs(hits)), ["work/_global/w", "work/app/ok"])
+            out = expand(st, hits, env="work", repo="app")
+            self.assertEqual(sorted(self.refs(out)), ["work/_global/w", "work/app/ok"])
+            stray = candidates(st, "home", "app", query="zeta")
+            self.assertEqual(self.refs(expand(st, stray, env="work", repo="app")), [])
+
     def test_empty(self):
         self.assertEqual(candidates(self.store, "work", "app"), [])
         with tempfile.TemporaryDirectory() as t:
@@ -114,7 +144,7 @@ class SearchTest(unittest.TestCase):
             by = {h.node.ref: h for h in expand(st, seed, hops=2, env="work", repo="app")}
             self.assertEqual((by["work/app/c"].hops, by["work/app/c"].via), (2, "caused_by"))
             self.assertEqual(by["work/app/c"].signals, ["2 hops via caused_by"])
-            self.assertAlmostEqual(by["work/app/c"].score, by["work/app/b"].score * 0.5 * 0.5 * 0.5)
+            self.assertAlmostEqual(by["work/app/c"].score, by["work/app/b"].score * 0.5 * 0.5)
             self.assertEqual(set(by), {"work/app/a", "work/app/b", "work/app/c"})
             one = expand(st, seed, hops=1, env="work", repo="app")
             self.assertEqual(self.refs(one), ["work/app/a", "work/app/b"])
@@ -142,6 +172,11 @@ class SearchTest(unittest.TestCase):
         data = json.loads(out)
         self.assertEqual(set(data[0]), {"ref", "score", "memory_type", "state", "signals", "hops", "via"})
         self.assertEqual(self._run("associate", "zzzz", "--env", "work", cwd=app)[:2], (0, ""))
+        self.assertEqual(self._run("associate", "zzzz", "--json", "--env", "work", cwd=app)[:2], (0, "[]\n"))
+        for bad in ("0", "-1", "x"):
+            with self.assertRaises(SystemExit) as cm:
+                self._run("associate", "alpha", "--limit", bad, cwd=app)
+            self.assertEqual(cm.exception.code, 2)
         code, out, err = self._run("associate", "alpha", cwd=lone)
         self.assertEqual((code, out), (1, ""))
         self.assertIn("not opted in", err)
