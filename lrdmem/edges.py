@@ -32,8 +32,8 @@ def create(store: Store, source_ref: str, target_ref: str, type: str, *, evidenc
     state, a missing or non-memory endpoint, a self-edge, a target outside the source's env and `_global` (a
     `_global` source may only target `_global`), a weight outside 0..1, or a secret anywhere (by included); all of
     that is checked before anything is written, and the edge is removed again if its revision cannot be written.
-    When an invalidated edge of the triple exists the new file is named from the triple plus the id of that
-    invalidated edge (the last by id), so two devices converge on the same name.
+    When an invalidated edge of the triple exists the new file is named from the triple plus a hash of the sorted
+    ids of all its invalidated edges (one more each cycle), so two devices with the same history converge on a name.
     """
     if type not in EDGE_TYPES:
         raise write.Refused(f"type must be one of {list(EDGE_TYPES)}")
@@ -47,7 +47,7 @@ def create(store: Store, source_ref: str, target_ref: str, type: str, *, evidenc
     items = [e if isinstance(e, Evidence) else Evidence.from_dict(e) for e in evidence]
     for e in items:
         write.guard("\n".join(e.to_dict().values()))
-    if weight is not None and not (isinstance(weight, (int, float)) and math.isfinite(weight) and 0 <= weight <= 1):
+    if weight is not None and not (isinstance(weight, (int, float)) and not isinstance(weight, bool) and math.isfinite(weight) and 0 <= weight <= 1):
         raise write.Refused("weight must be a number in 0..1")
     same = (src.ref, dst.ref, type)
     old = next((e for e in store.edges() if (e.source, e.target, e.type) == same and e.state != "invalidated"), None)
@@ -56,8 +56,8 @@ def create(store: Store, source_ref: str, target_ref: str, type: str, *, evidenc
             write.add_evidence(old.path, e)
         return store.node(old.ref), False
     folder = src.path.parent
-    old = sorted((e for e in store.edges() if (e.source, e.target, e.type) == same), key=lambda e: e.id)
-    key = "|".join(same + ((old[-1].id,) if old else ()))
+    gone = sorted(e.id for e in store.edges() if (e.source, e.target, e.type) == same)
+    key = "|".join(same + ((hashlib.sha1("|".join(gone).encode(), usedforsecurity=False).hexdigest(),) if gone else ()))
     digest = hashlib.sha1(key.encode(), usedforsecurity=False).hexdigest()[:12]
     today = date.today().isoformat()
     write.target(store, folder, "edges/x.md")
@@ -71,12 +71,13 @@ def create(store: Store, source_ref: str, target_ref: str, type: str, *, evidenc
     text = dump({k: v for k, v in head.items() if v is not None}) + "\n"
     write.guard(text)
     (folder / "edges").mkdir(exist_ok=True)
-    if not write.create(path, text):
+    made = write.create_new(path, text)
+    if made is None:
         raise write.Refused("edge file already exists")
     try:
         revision.record(store, folder, ref, "create", {}, {"type": type, "state": state}, "edge created", by)
     except Exception:
-        write.remove(path)
+        write.discard(store, folder, path.relative_to(folder).as_posix(), made)
         raise
     return store.node(ref), True
 

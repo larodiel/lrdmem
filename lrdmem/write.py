@@ -80,6 +80,11 @@ def create(path: Path, text: str) -> bool:
     leaves no claim on the name. Without hard links it falls back to a direct O_EXCL|O_NOFOLLOW write.
     Refused on a secret.
     """
+    return create_new(path, text) is not None
+
+
+def create_new(path: Path, text: str) -> os.stat_result | None:
+    """Like `create`, but returns the new file's stat (its identity, for `discard`) or None when it already exists."""
     guard(text)
     tmp = path.with_name(f".{path.name}.{os.getpid()}.{os.urandom(4).hex()}.tmp")
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
@@ -88,11 +93,12 @@ def create(path: Path, text: str) -> bool:
             f.write(text)
             f.flush()
             os.fsync(f.fileno())
+            st = os.fstat(f.fileno())
         try:
             os.link(tmp, path)
-            return True
+            return st
         except FileExistsError:
-            return False
+            return None
         except OSError:
             pass  # ponytail: no hard links on this filesystem; the direct write below can show a partial file
     except OSError:
@@ -105,15 +111,28 @@ def create(path: Path, text: str) -> bool:
     try:
         fd = os.open(path, flags, 0o644)
     except FileExistsError:
-        return False
+        return None
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(text)
+        f.flush()
+        return os.fstat(f.fileno())
+
+
+def discard(store: Store, scope_folder: Path, rel: str, created: os.stat_result) -> bool:
+    """Delete `rel` in a scope folder only if it is still the file `create_new` returned `created` for.
+
+    Resolved through `target` (store, scope and symlink checks, Refused on violation); False, deleting nothing,
+    when the file is gone or its (device, inode) differs, i.e. it was replaced since.
+    """
+    path = target(store, scope_folder, rel)
+    try:
+        now = os.lstat(path)
+    except FileNotFoundError:
+        return False
+    if (now.st_dev, now.st_ino) != (created.st_dev, created.st_ino):
+        return False
+    os.unlink(path)
     return True
-
-
-def remove(path: Path) -> None:
-    """Delete a file this process just created (rolling back a half-finished write); a missing file is fine."""
-    path.unlink(missing_ok=True)
 
 
 def unique(path_stem: Path) -> Path:

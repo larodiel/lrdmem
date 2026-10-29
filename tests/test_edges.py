@@ -73,13 +73,32 @@ class EdgesTest(unittest.TestCase):
                 edges.create(self.store, A, B, "supports", by="t")
         self.assertFalse(list((self.root / "work/app").glob("edges/*")))
 
-    def test_recreate_after_invalidate_is_deterministic(self):
-        e, _ = edges.create(self.store, A, B, "supports", by="t")
-        edges.set_state(self.store, e, "invalidated", "no", "t")
-        e2, _ = edges.create(self.store, A, B, "supports", by="t")
-        import hashlib
-        h = hashlib.sha1(f"{A}|{B}|supports|{e.id}".encode()).hexdigest()[:12]
-        self.assertTrue(e2.path.name.endswith(f"-e{h}.md"))
+    def test_recreate_cycles_get_distinct_deterministic_names(self):
+        names = []
+        for _ in range(5):
+            e, made = edges.create(self.store, A, B, "supports", by="t")
+            self.assertTrue(made)
+            names.append(e.path.name)
+            edges.set_state(self.store, e, "invalidated", "no", "t")
+        self.assertEqual(len(set(names)), 5)
+        self.assertEqual(len(list((self.root / "work/app/edges").iterdir())), 5)
+
+    def test_weight_rejects_bool(self):
+        with self.assertRaises(write.Refused):
+            edges.create(self.store, A, B, "supports", weight=True, by="t")
+
+    def test_rollback_does_not_delete_a_replaced_file(self):
+        from unittest import mock
+
+        def boom(store, folder, ref, *a, **k):
+            p = next((self.root / "work/app/edges").glob("*.md"))
+            p.unlink()
+            p.write_text("someone else\n")
+            raise write.Refused("boom")
+        with mock.patch("lrdmem.revision.record", side_effect=boom):
+            with self.assertRaises(write.Refused):
+                edges.create(self.store, A, B, "supports", by="t")
+        self.assertEqual(next((self.root / "work/app/edges").glob("*.md")).read_text(), "someone else\n")
 
     def test_set_state_validation(self):
         e, _ = edges.create(self.store, A, B, "supports", by="t")

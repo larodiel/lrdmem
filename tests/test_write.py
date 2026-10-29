@@ -25,6 +25,28 @@ class WriteTest(unittest.TestCase):
         self.folder = self.root / "acme/web"
         self.mem = self.folder / "m.md"
 
+    def test_discard_only_the_created_file(self):
+        p = self.folder / "edges"
+        p.mkdir()
+        st = write.create_new(p / "a.md", "x\n")
+        self.assertIsNone(write.create_new(p / "a.md", "y\n"))
+        self.assertTrue(write.discard(self.store, self.folder, "edges/a.md", st))
+        self.assertFalse((p / "a.md").exists())
+        st = write.create_new(p / "b.md", "x\n")
+        (p / "b.md").unlink()
+        (p / "b.md").write_text("replaced\n")
+        self.assertFalse(write.discard(self.store, self.folder, "edges/b.md", st))
+        self.assertTrue((p / "b.md").exists())
+
+    def test_discard_refuses_outside_the_store(self):
+        victim = self.tmp / "victim.txt"
+        victim.write_text("keep")
+        st = os.stat(victim)
+        for folder, rel in ((self.tmp, "victim.txt"), (self.folder, "../../../victim.txt")):
+            with self.subTest(rel), self.assertRaises(write.Refused):
+                write.discard(self.store, folder, rel, st)
+        self.assertTrue(victim.exists())
+
     # target
 
     def test_target_inside_scope(self):
