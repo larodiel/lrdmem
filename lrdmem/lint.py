@@ -154,7 +154,7 @@ def _memory(m: Memory, text: str, known: set[str], store: Store) -> list[str]:
         out.append("no metadata.author")
     if not _is_date(meta.get("updated")):
         out.append("metadata.updated is not YYYY-MM-DD")
-    if "**Why:**" not in text or "**How to apply:**" not in text:
+    if m.memory_type != "episodic" and ("**Why:**" not in text or "**How to apply:**" not in text):
         out.append("needs **Why:** and **How to apply:** lines")
     if "check" in m.data:
         c = m.check

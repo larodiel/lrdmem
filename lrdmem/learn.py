@@ -1,4 +1,8 @@
-"""Record a correction: a context (the incident) linked to a memory (the rule)."""
+"""Record a correction: an experience (the incident) that creates or reinforces a memory (the rule).
+
+The experience is a `correction` (a `review` when the source is a PR); the memory goes through `propose.apply`, so a
+new one starts active with the experience as supporting evidence and an existing one gains that evidence.
+"""
 
 import re
 from dataclasses import dataclass, field
@@ -6,8 +10,9 @@ from datetime import date
 from pathlib import Path
 
 from lrdmem import write
-from lrdmem.frontmatter import dump, parse
+from lrdmem.frontmatter import parse
 from lrdmem.lint import KINDS, SOURCES, has_secret
+from lrdmem.model import v01_memory_type
 from lrdmem.store import AmbiguousRepo, Store, StoreFormatError, resolve
 
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
@@ -28,7 +33,8 @@ class LearnRefused(Exception):
 
 @dataclass
 class LearnResult:
-    """What learn wrote: the new context, the memory it reinforces, and near-duplicates seen."""
+    """What learn wrote: the new experience (`context`, its v0.1 name), the memory it reinforces, and near-duplicates
+    seen."""
 
     context: Path
     memory: Path
@@ -95,7 +101,7 @@ def learn(store: Store, cwd: Path, *, memory: str, mistake: str, correction: str
           description: str | None = None, body: str | None = None, why: str | None = None, how: str | None = None,
           paths: list[str] = (), commands: list[str] = (), repos: list[str] = (), env: str | None = None,
           new: bool = False, device: str = "") -> LearnResult:
-    """Write a context for `memory`, creating the memory when absent; raise LearnRefused on invalid input.
+    """Record an experience for `memory`, creating the memory when absent; raise LearnRefused on invalid input.
 
     A new memory needs description, body, why and how; paths, commands and repos become its triggers.
     """
@@ -131,39 +137,34 @@ def learn(store: Store, cwd: Path, *, memory: str, mistake: str, correction: str
     if dups and not new:
         raise LearnRefused("similar memories exist (use --new to override): " + ", ".join(dups), dups)
     try:  # after the text checks: a refused learn leaves no trace, not even the format marker
-        for rel in (f"{memory}.md", "contexts", "MEMORY.md"):
+        for rel in (f"{memory}.md", "experiences/x.md", "MEMORY.md"):
             write.target(store, folder, rel)
     except (write.Refused, StoreFormatError) as e:
         raise LearnRefused(str(e)) from None
 
-    try:  # the write layer re-checks secrets, scope and symlinks; a late refusal is still a LearnRefused
-        today = date.today().isoformat()
-        (folder / "contexts").mkdir(parents=True, exist_ok=True)
-        created = False
-        if not exists:
-            meta = {"type": "feedback", **({"kind": kind} if kind else {}), "author": agent, "updated": today}
-            triggers = {k: list(v) for k, v in (("paths", paths), ("commands", commands), ("repos", repos)) if v}
-            head = {"name": memory, "description": description, "metadata": meta,
-                    **({"triggers": triggers} if triggers else {})}
-            text = f"{body.strip()}\n\n**Why:** {why.strip()}\n**How to apply:** {how.strip()}\n"
-            created = write.create(path, dump(head) + "\n\n" + text)
-            if created:
-                write.index_line(folder, f"- [{memory}]({memory}.md) — {description}")
-        if not created:
-            _touch(path, today)
+    from lrdmem import experience, propose  # both build on this module
 
-        repo = store.scope_of(folder)[1]
-        data = {"id": "", "date": today, "agent": agent, "device": device, "repo": repo, "files": list(files),
-                "source": source, "pr": pr, "memories": [memory]}
-        text_body = f"\n**Mistake:** {mistake.strip()}\n\n**Correction:** {correction.strip()}\n"
-        n = 1
-        while True:
-            cid = f"{today}-{memory}" + (f"-{n}" if n > 1 else "")
-            data["id"] = cid
-            head = dump({k: v for k, v in data.items() if v not in (None, "", [])})
-            ctx = write.target(store, folder, f"contexts/{cid}.md")
-            if write.create(ctx, head + "\n" + text_body):
-                return LearnResult(ctx, path, created, dups)
-            n += 1
+    try:  # the write layer re-checks secrets, scope and symlinks; a late refusal is still a LearnRefused
+        exp, _ = experience.add(store, cwd, kind="review" if source == "pr" else "correction", agent=agent,
+                                text=f"**Mistake:** {mistake.strip()}\n\n**Correction:** {correction.strip()}",
+                                scope=scope, files=files, source=source, ref=pr, device=device, env=env)
+        if exists:
+            cand = {"classification": "equivalent",
+                    "relates_to": path.relative_to(store.root).with_suffix("").as_posix()}
+        else:
+            triggers = {k: list(v) for k, v in (("paths", paths), ("commands", commands), ("repos", repos)) if v}
+            cand = {"slug": memory, "memory_type": v01_memory_type(kind or ""), "description": description,
+                    "body": body, "why": why, "how": how, "scope": scope, "classification": "new",
+                    **({"triggers": triggers} if triggers else {})}
+        r = propose.apply(store, cwd, {"experience": exp.ref, "candidates": [cand]}, agent=agent, device=device,
+                          env=env)
+        if r.refused:
+            raise LearnRefused(r.refused[0][1])
+        created = bool(r.created)
+        if created and kind:
+            write.set_fields(path, {"kind": kind})
+        if not created:
+            _touch(path, date.today().isoformat())
+        return LearnResult(exp.path, path, created, dups)
     except write.Refused as e:
         raise LearnRefused(str(e)) from None

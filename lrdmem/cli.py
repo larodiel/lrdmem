@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from lrdmem import __version__, checks, config, experience, revision
+from lrdmem import __version__, checks, config, experience, propose, revision
 from lrdmem.export import to_dot, to_html, to_json
 from lrdmem.graph import AmbiguousSlug, Graph
 from lrdmem.hooks import HookInput, dispatch, handle
@@ -242,6 +242,28 @@ def _experience(store: Store, g: Graph, args) -> int:
     return 0
 
 
+def _propose(store: Store, g: Graph, args) -> int:
+    try:
+        try:
+            piped = "" if sys.stdin is None or sys.stdin.isatty() else sys.stdin.read()
+        except (OSError, UnicodeDecodeError):
+            raise propose.write.Refused("could not read stdin as UTF-8 text") from None
+        try:
+            payload = json.loads(piped)
+        except ValueError:
+            raise propose.write.Refused("expected a JSON payload on stdin") from None
+        r = propose.apply(store, Path.cwd(), payload, agent=args.agent, device=config.load()["device"], env=args.env)
+    except (propose.write.Refused, StoreFormatError, OSError) as e:
+        print(printable(str(e)), file=sys.stderr)
+        return 1
+    for label, refs in (("created", r.created), ("evidence", r.evidence_added), ("edge", r.edges)):
+        for ref in refs:
+            _out(f"{label} {ref}")
+    for i, reason in r.refused:
+        _out(f"refused {i}: {reason}")
+    return 1 if not (r.created or r.evidence_added or r.edges) and r.refused else 0
+
+
 def _learn_pr(store: Store, g: Graph, args) -> int:
     try:
         r = learn_pr(store, Path.cwd(), args.url, args.agent, env=args.env, device=config.load()["device"])
@@ -463,6 +485,12 @@ def _main(argv: list[str] | None) -> int:
     q.add_argument("--request-id", dest="request_id")
     q.add_argument("--env")
     q.add_argument("text", nargs="?")
+    p = sub.add_parser("memory", help="propose memories extracted from an experience")
+    msub = p.add_subparsers(dest="action", required=True)
+    q = msub.add_parser("propose", help="validate and write candidates; a JSON payload on stdin")
+    q.set_defaults(fn=_propose)
+    q.add_argument("--agent", required=True)
+    q.add_argument("--env")
     p = sub.add_parser("learn-pr", help="link a GitHub PR's review comments to the memories they reinforce")
     p.set_defaults(fn=_learn_pr)
     p.add_argument("url")

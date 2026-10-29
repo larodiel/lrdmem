@@ -98,21 +98,23 @@ class PrTest(unittest.TestCase):
         self.assertEqual(r.linked, [(URL + "#discussion_r1", "acme/web/spaces.md")])
         self.assertEqual([c["id"] for c in r.unmatched], [2])
         self.assertIn(URL + "#discussion_r4", err.getvalue())
-        ctxs = list((self.root / "acme/web/contexts").glob("*.md"))
+        ctxs = list((self.root / "acme/web/experiences").glob("*.md"))
         self.assertEqual(len(ctxs), 1)
         c = parse(ctxs[0].read_text())
-        self.assertEqual((c["source"], c["pr"], c["files"], c["memories"]), ("pr", URL + "#discussion_r1", ["a.py"], ["spaces"]))
+        self.assertEqual((c["source"], c["ref"], c["files"], c["kind"]), ("pr", URL + "#discussion_r1", ["a.py"], "review"))
+        ev = parse((self.root / "acme/web/spaces.md").read_text())["evidence"]
+        self.assertEqual(ev, [{"ref": "acme/web/experiences/" + ctxs[0].stem, "kind": "supports", "weight": "1.0"}])
         text = ctxs[0].read_text()
         self.assertIn("PR review by alice", text)
         self.assertIn("**Mistake:** Please indent with spaces, tabs are wrong here. thanks", text)
-        self.assertFalse((self.root / "acme/other/contexts").exists())  # aaa matches equally well but is another repo's
+        self.assertFalse((self.root / "acme/other/experiences").exists())  # aaa matches equally well but is another repo's
 
     def test_rerun_is_idempotent(self):
         run = fake_run([comment(1, "Please indent with spaces, tabs are wrong here.")])
         learn_pr(self.store, self.repo, URL, "claude", run)
         r = learn_pr(self.store, self.repo, URL, "claude", run)
         self.assertEqual((r.linked, r.already), ([], [URL + "#discussion_r1"]))
-        self.assertEqual(len(list((self.root / "acme/web/contexts").glob("*.md"))), 1)
+        self.assertEqual(len(list((self.root / "acme/web/experiences").glob("*.md"))), 1)
         out = io.StringIO()
         with mock.patch.dict(os.environ, {"LRDMEM_STORE": str(self.root)}), \
                 mock.patch("lrdmem.pr.fetch_review_comments", lambda u, run_=None: fetch_review_comments(u, run)), \
@@ -133,7 +135,7 @@ class PrTest(unittest.TestCase):
         self.assertEqual(r.linked, [])
         self.assertEqual([(c["id"], c["note"]) for c in r.unmatched],
                          [(1, "CONTRIBUTOR"), (2, "NONE"), (3, "FIRST_TIME_CONTRIBUTOR"), (4, "none"), (7, "NONE")])
-        self.assertFalse((self.root / "acme/web/contexts").exists())
+        self.assertFalse((self.root / "acme/web/experiences").exists())
 
     def test_other_repo_pr_refused(self):
         for u in (URL.replace("/web/", "/other/"), URL.replace("/web/", "/WEB/")):
@@ -143,7 +145,7 @@ class PrTest(unittest.TestCase):
             else:
                 with self.assertRaises(LookupError):
                     learn_pr(self.store, self.repo, u, "claude", run)
-        self.assertEqual(len(list((self.root / "acme/web/contexts").glob("*.md"))), 1)
+        self.assertEqual(len(list((self.root / "acme/web/experiences").glob("*.md"))), 1)
 
     def test_remote_forms_accepted(self):
         for url in ("git@github.com:O/Web.git", "ssh://git@github.com/o/web", "https://github.com/o/web"):
@@ -156,7 +158,7 @@ class PrTest(unittest.TestCase):
         with self.assertRaises(LookupError):
             learn_pr(self.store, self.repo, URL.replace("/o/", "/evil/"), "claude", run)
         self.assertEqual(run.calls, [])
-        self.assertFalse((self.root / "acme/web/contexts").exists())
+        self.assertFalse((self.root / "acme/web/experiences").exists())
 
     def test_other_remote_of_checkout_accepted_non_github_ignored(self):
         subprocess.run(["git", "remote", "set-url", "origin", "https://gitlab.com/evil/web.git"], cwd=self.repo, check=True)
@@ -197,7 +199,7 @@ class PrTest(unittest.TestCase):
         run = fake_run([comment(1, "indent spaces tabs " + "x" * 500)])
         r = learn_pr(self.store, self.repo, URL, "claude", run)
         self.assertEqual(len(r.linked), 1)
-        line = next(ln for ln in next((self.root / "acme/web/contexts").glob("*.md")).read_text().splitlines()
+        line = next(ln for ln in next((self.root / "acme/web/experiences").glob("*.md")).read_text().splitlines()
                     if ln.startswith("**Mistake:**"))
         self.assertEqual(len(line), len("**Mistake:** ") + 300)
 
@@ -207,8 +209,8 @@ class PrTest(unittest.TestCase):
         run = fake_run([comment(1, "sanitize the request payload fields"), comment(2, "use immutable dataclasses")])
         r = learn_pr(self.store, self.repo, URL, "claude", run)
         self.assertEqual(r.linked, [(URL + "#discussion_r1", "acme/_global/envrule.md"), (URL + "#discussion_r2", "_global/globalrule.md")])
-        self.assertEqual(len(list((self.root / "acme/_global/contexts").glob("*.md"))), 1)
-        self.assertEqual(len(list((self.root / "_global/contexts").glob("*.md"))), 1)
+        self.assertEqual(len(list((self.root / "acme/_global/experiences").glob("*.md"))), 1)
+        self.assertEqual(len(list((self.root / "_global/experiences").glob("*.md"))), 1)
 
     def test_not_opted_in(self):
         other = self.repo.parent / "nope"

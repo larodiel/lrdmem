@@ -84,7 +84,11 @@ def fetch_review_comments(url: str, run=subprocess.run) -> list[dict]:
 
 def learn_pr(store: Store, cwd: Path, url: str, agent: str, run=subprocess.run, env: str | None = None,
              device: str = "") -> PrResult:
-    """Record each human review comment as a context of its best-matching memory; LookupError if cwd is not opted in."""
+    """Record each trusted review comment as a `review` experience that adds evidence to its best-matching memory.
+
+    A comment already recorded (an experience in this repo's scopes with that `ref`) is reported as already linked.
+    LookupError if cwd is not opted in.
+    """
     owner, pr_repo, _ = _parse(url)
     found = resolve(store, cwd, env)
     if not found:
@@ -102,7 +106,8 @@ def learn_pr(store: Store, cwd: Path, url: str, agent: str, run=subprocess.run, 
                    key=lambda m: m.slug)
     words = [(m, terms(m.slug.replace("-", " ") + " " + m.description)) for m in cands]
     result = PrResult()
-    seen = {c.data.get("pr") for c in store.contexts()}
+    seen = {x.data.get("ref") for x in store.experiences() if x.env in (None, e) and x.repo in (None, repo)}
+    seen |= {c.data.get("pr") for c in store.contexts()}  # v0.1 contexts named the comment in `pr`
     for c in comments:
         if c["author"].endswith("[bot]"):
             continue

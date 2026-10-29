@@ -44,6 +44,14 @@ class Graph:
                 self._contexts[k].append(c)
                 for other in keys:
                     self._link(k, other)
+        for k, m in self._nodes.items():  # v2: experiences a memory names as evidence
+            seen = {c.path for c in self._contexts[k]}
+            for ev in m.evidence:
+                x = store.node(ev.ref)
+                if isinstance(x, Experience) and x.path not in seen:
+                    seen.add(x.path)
+                    self._contexts[k].append(x)
+            self._contexts[k].sort(key=lambda c: c.date)
 
     def memories(self) -> list[Memory]:
         """Every memory node of the graph."""
@@ -78,7 +86,7 @@ class Graph:
         return (m.env, m.slug) if m else None
 
     def strength(self, slug: str | Memory, env: str | None = None) -> int:
-        """Number of contexts linking the memory."""
+        """Number of contexts (and evidence experiences) linking the memory."""
         return len(self._contexts.get(self._key(slug, env), []))
 
     def contexts_of(self, slug: str | Memory, env: str | None = None) -> list[Context]:

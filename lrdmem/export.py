@@ -24,7 +24,7 @@ def to_json(graph: Graph) -> dict:
     nodes += [
         {"id": _id(graph, c), "type": "context", "kind": "context", "env": c.env or "", "label": _first(c),
          "strength": 0}
-        for c in graph.store.contexts()
+        for c in graph.store.experiences()
     ]
     edges = [{"source": _id(graph, s), "target": _id(graph, t), "rel": rel} for s, t, rel in graph.edges()]
     return {"nodes": nodes, "edges": edges}

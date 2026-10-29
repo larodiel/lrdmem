@@ -36,12 +36,14 @@ class LearnTest(unittest.TestCase):
         r = self.learn(memory="spaces", files=["a.py"], pr="http://x/1", **NEW)
         self.assertTrue(r.created)
         self.assertEqual(r.memory, self.root / "acme/web/spaces.md")
-        self.assertEqual(r.context, self.root / f"acme/web/contexts/{TODAY}-spaces.md")
+        self.assertEqual(r.context.parent, self.root / "acme/web/experiences")
         m = parse(r.memory.read_text())
         self.assertEqual(m["metadata"]["author"], "claude")
         self.assertEqual(m["metadata"]["updated"], TODAY)
         c = parse(r.context.read_text())
-        self.assertEqual((c["memories"], c["files"], c["repo"], c["source"]), (["spaces"], ["a.py"], "web", "chat"))
+        self.assertEqual((c["kind"], c["files"], c["repo"], c["source"]), ("correction", ["a.py"], "web", "chat"))
+        self.assertEqual(m["evidence"], [{"ref": f"acme/web/experiences/{r.context.stem}", "kind": "supports",
+                                          "weight": "1.0"}])
         self.assertNotIn("mistake", c)
         self.assertIn("**Mistake:** used tabs", r.context.read_text())
         self.assertIn("**Correction:** use spaces", r.context.read_text())
@@ -51,8 +53,8 @@ class LearnTest(unittest.TestCase):
         self.learn(memory="spaces", **NEW)
         r = self.learn(memory="spaces", **KW)
         self.assertFalse(r.created)
-        self.assertEqual(r.context.name, f"{TODAY}-spaces-2.md")
-        self.assertEqual(parse(r.context.read_text())["id"], f"{TODAY}-spaces-2")
+        self.assertTrue(r.context.name.startswith(TODAY) and r.context.name.endswith("-2.md"), r.context.name)
+        self.assertEqual(parse(r.context.read_text())["id"], r.context.stem)
         self.assertEqual((self.root / "acme/web/MEMORY.md").read_text().count("spaces.md"), 1)
         self.assertEqual(Graph(self.store).strength("spaces", "acme"), 2)
 
@@ -84,7 +86,7 @@ class LearnTest(unittest.TestCase):
             with self.subTest(field), self.assertRaises(LearnRefused):
                 self.learn(memory="spaces", **kw)
         self.assertFalse((self.root / "acme/web/spaces.md").exists())
-        self.assertFalse((self.root / "acme/web/contexts").exists())
+        self.assertFalse((self.root / "acme/web/experiences").exists())
 
     def test_env_must_be_a_known_environment(self):
         for bad in ("..", str(self.tmp), "nope"):
@@ -125,10 +127,10 @@ class LearnTest(unittest.TestCase):
             self.learn(memory="spaces", **NEW)
         (folder / "MEMORY.md").unlink()
         (folder / "MEMORY.md").write_text("")
-        (folder / "contexts").symlink_to(evil)
+        (folder / "experiences").symlink_to(evil)
         with self.assertRaises(LearnRefused):
             self.learn(memory="spaces", **NEW)
-        (folder / "contexts").unlink()
+        (folder / "experiences").unlink()
         (folder / "spaces.md").symlink_to(evil / "m.md")
         with self.assertRaises(LearnRefused):
             self.learn(memory="spaces", **KW)
@@ -196,12 +198,14 @@ class LearnTest(unittest.TestCase):
         original = ("---\nname: spaces\n# keep this comment\ndescription: d\nmetadata:\n  type: feedback\n"
                     "  updated: 2020-01-01\n  author: me\ntriggers:\n  paths:\n    - '*.py'\n---\nbody\n")
         p.write_text(original)
-        self.learn(memory="spaces", **KW)
-        self.assertEqual(p.read_text(), original.replace("2020-01-01", TODAY))
+        r = self.learn(memory="spaces", **KW)
+        ev = f"evidence: [{{ref: acme/web/experiences/{r.context.stem}, kind: supports, weight: 1.0}}]\n"
+        self.assertEqual(p.read_text(), original.replace("2020-01-01", TODAY).replace("\n---\nbody", f"\n{ev}---\nbody"))
         no_updated = original.replace("  updated: 2020-01-01\n", "") + "updated: 2020-01-01\n"
         p.write_text(no_updated)
-        self.learn(memory="spaces", **KW)
-        self.assertEqual(p.read_text(), no_updated)
+        r = self.learn(memory="spaces", **KW)
+        ev = f"evidence: [{{ref: acme/web/experiences/{r.context.stem}, kind: supports, weight: 1.0}}]\n"
+        self.assertEqual(p.read_text(), no_updated.replace("\n---\nbody", f"\n{ev}---\nbody"))
 
     def test_unparseable_memory_untouched(self):
         (self.root / "acme/web/spaces.md").write_text("no frontmatter\n")
@@ -273,7 +277,8 @@ class LearnTest(unittest.TestCase):
         with mock.patch.dict(os.environ, {"LRDMEM_STORE": str(self.root)}), mock.patch("os.getcwd", return_value=str(self.repo)), \
                 mock.patch("pathlib.Path.cwd", return_value=self.repo), redirect_stdout(out), redirect_stderr(err):
             self.assertEqual(main(argv), 0)
-            self.assertEqual(out.getvalue().split(), [f"acme/web/contexts/{TODAY}-spaces.md", "acme/web/spaces.md"])
+            [exp] = (self.root / "acme/web/experiences").glob("*.md")
+            self.assertEqual(out.getvalue().split(), [f"acme/web/experiences/{exp.name}", "acme/web/spaces.md"])
             self.assertEqual(main(argv[:2] + ["indent-spaces"] + argv[3:]), 1)
         self.assertEqual(err.getvalue().split("\n")[-2], "spaces")
 
