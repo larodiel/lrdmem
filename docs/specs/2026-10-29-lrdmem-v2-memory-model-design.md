@@ -331,6 +331,11 @@ recusa escrever e avisa. Lint avisa se o marcador estiver ausente num store já 
 
 ## 9. Segurança
 
+**Nenhum dado sensível entra no store, nunca** (decisão de Victor): senhas, API keys, tokens, secrets e chaves
+privadas são recusados em todo caminho de escrita (memórias, experiências, saída de checks, relações, revisões, fila e
+feedback) por uma única barreira no módulo de escrita; a saída de checks é redigida linha a linha antes de ser
+registrada; o lint continua acusando o que entrar à mão.
+
 Todas as invariantes do v0.1 (AGENTS.md) continuam. Adições: `memory propose`, `consolidate --resolve` e `feedback`
 validam escopo, segredos, symlinks e ids como o `learn`; conteúdo vindo de agentes é dado, nunca instrução; a fila de
 consolidação não pode conter comandos executáveis (uma decisão nunca cria/altera `check.run` aprovado — mudar
