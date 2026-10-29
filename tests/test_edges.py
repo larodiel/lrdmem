@@ -56,6 +56,46 @@ class EdgesTest(unittest.TestCase):
         with self.assertRaises(write.Refused):
             edges.create(self.store, A, B, "supports", by="sk-" + "a" * 40)
 
+    def test_refused_create_leaves_nothing(self):
+        for kw in ({"by": "sk-" + "a" * 40}, {"by": "t", "weight": 2.0}, {"by": "t", "weight": float("nan")}):
+            with self.subTest(kw), self.assertRaises(write.Refused):
+                edges.create(self.store, A, B, "supports", **kw)
+            self.assertFalse(list((self.root / "work/app").glob("edges/*")))
+            self.assertFalse(list((self.root / "work/app").glob("revisions/*")))
+        e, made = edges.create(self.store, A, B, "supports", by="t")
+        self.assertTrue(made)
+        self.assertEqual(len(self.store.revisions()), 1)
+
+    def test_revision_failure_rolls_back_edge(self):
+        from unittest import mock
+        with mock.patch("lrdmem.revision.record", side_effect=write.Refused("boom")):
+            with self.assertRaises(write.Refused):
+                edges.create(self.store, A, B, "supports", by="t")
+        self.assertFalse(list((self.root / "work/app").glob("edges/*")))
+
+    def test_recreate_after_invalidate_is_deterministic(self):
+        e, _ = edges.create(self.store, A, B, "supports", by="t")
+        edges.set_state(self.store, e, "invalidated", "no", "t")
+        e2, _ = edges.create(self.store, A, B, "supports", by="t")
+        import hashlib
+        h = hashlib.sha1(f"{A}|{B}|supports|{e.id}".encode()).hexdigest()[:12]
+        self.assertTrue(e2.path.name.endswith(f"-e{h}.md"))
+
+    def test_set_state_validation(self):
+        e, _ = edges.create(self.store, A, B, "supports", by="t")
+        e2, _ = edges.create(self.store, A, G, "supports", by="t")
+        implicit = [x for x in Graph(self.store).typed_edges() if x.path == Path()][0]
+        for edge, kw in ((implicit, {}), (e, {"superseded_by": "nope"}), (e, {"superseded_by": e.id}),
+                         (e, {"superseded_by": "home/app/edges/x"})):
+            with self.subTest(kw), self.assertRaises(write.Refused):
+                edges.set_state(self.store, edge, "superseded", "r", "t", **kw)
+        edges.set_state(self.store, e, "superseded", "r", "t", superseded_by=e2.id)
+        self.assertEqual(self.store.node(e.ref).superseded_by, e2.id)
+
+    def test_implicit_links_deduped_and_masked(self):
+        e, _ = edges.create(self.store, A, B, "related_to", by="t")
+        self.assertEqual([x for x in Graph(self.store).typed_edges() if x.path == Path()], [])
+
     def test_invalidate_keeps_file_and_revision(self):
         e, _ = edges.create(self.store, A, B, "supports", by="t")
         edges.set_state(self.store, e, "invalidated", "wrong", "t")
@@ -67,9 +107,9 @@ class EdgesTest(unittest.TestCase):
         self.assertNotEqual(e2.path, e.path)
         edges.set_state(self.store, e2, "validated", "ok", "t")
         self.assertIn("state_change", [r.action for r in self.store.revisions()])
-        edges.set_state(self.store, self.store.node(e2.ref), "superseded", "new", "t", superseded_by="x")
+        edges.set_state(self.store, self.store.node(e2.ref), "superseded", "new", "t", superseded_by=e.id)
         self.assertIn("supersede", [r.action for r in self.store.revisions()])
-        self.assertEqual(self.store.node(e2.ref).superseded_by, "x")
+        self.assertEqual(self.store.node(e2.ref).superseded_by, e.id)
 
     def test_neighbours_and_implicit_links(self):
         e, _ = edges.create(self.store, A, G, "related_to", by="t")

@@ -71,6 +71,35 @@ class GraphTest(unittest.TestCase):
         self.assertEqual([(m.slug, n) for m, n in g.hot(2)], [("same", 4), ("many", 3), ("withev", 2)])
         self.assertEqual([m.slug for m, _ in g.hot(4)], ["same"])
 
+    def _ranked(self, mems, nexp=6):
+        """mems: slug -> [(experience index, kind, weight)]; returns hot(1) slugs."""
+        files = {}
+        for i in range(nexp):
+            files[f"work/app/experiences/e{i}.md"] = (
+                f"---\nid: e{i}\ndate: 2026-02-0{i + 1}\nkind: error\nagent: codex\n---\nx\n")
+        for slug, items in mems.items():
+            ev = ", ".join(f"{{ref: work/app/experiences/e{i}, kind: {k}, weight: {w}}}" for i, k, w in items)
+            files[f"work/app/{slug}.md"] = _mem(slug).replace("---\nbody", f"evidence: [{ev}]\n---\nbody")
+        t = tempfile.TemporaryDirectory()
+        self.addCleanup(t.cleanup)
+        return [m.slug for m, _ in Graph(Store(make_store(Path(t.name), files))).hot(1)]
+
+    def test_hot_multiplier_not_confidence_alone(self):
+        # conf alone: one > many (.63 > .59); conf x n: many (1.78) > one (.63)
+        got = self._ranked({"one": [(0, "supports", 1.0)], "many": [(i, "supports", 0.3) for i in (1, 2, 3)]})
+        self.assertEqual(got, ["many", "one"])
+
+    def test_hot_confidence_not_count_alone(self):
+        # n alone: weak (3) > strong (1); conf x n: strong .63 > weak .42
+        got = self._ranked({"strong": [(0, "supports", 1.0)], "weak": [(i, "supports", 0.05) for i in (1, 2, 3)]})
+        self.assertEqual(got, ["strong", "weak"])
+
+    def test_hot_refutes_lower_rank(self):
+        sup = [(i, "supports", 1.0) for i in (0, 1, 2)]
+        got = self._ranked({"refuted": sup + [(i, "refutes", 1.0) for i in (3, 4, 5)],
+                            "plain": [(3, "supports", 1.0), (4, "supports", 1.0)]})
+        self.assertEqual(got[0], "plain")
+
     def test_contexts_sorted_by_date(self):
         self.assertEqual([c.date for c in self.g.contexts_of("phpcs", env="work")],
                          ["2026-01-01", "2026-02-01", "2026-03-01"])

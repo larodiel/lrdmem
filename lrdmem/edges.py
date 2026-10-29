@@ -5,6 +5,7 @@ write.py and leaves a revision in the edge's own scope folder.
 """
 
 import hashlib
+import math
 from datetime import date
 
 from lrdmem import revision, write
@@ -29,7 +30,10 @@ def create(store: Store, source_ref: str, target_ref: str, type: str, *, evidenc
     The same (source, target, type) that is not invalidated returns the existing edge, with the new evidence added.
     The file is `<source scope>/edges/<date>-e<sha1(source|target|type)[:12]>.md`. Refused on an unknown type or
     state, a missing or non-memory endpoint, a self-edge, a target outside the source's env and `_global` (a
-    `_global` source may only target `_global`), or a secret.
+    `_global` source may only target `_global`), a weight outside 0..1, or a secret anywhere (by included); all of
+    that is checked before anything is written, and the edge is removed again if its revision cannot be written.
+    When an invalidated edge of the triple exists the new file is named from the triple plus the id of that
+    invalidated edge (the last by id), so two devices converge on the same name.
     """
     if type not in EDGE_TYPES:
         raise write.Refused(f"type must be one of {list(EDGE_TYPES)}")
@@ -43,6 +47,8 @@ def create(store: Store, source_ref: str, target_ref: str, type: str, *, evidenc
     items = [e if isinstance(e, Evidence) else Evidence.from_dict(e) for e in evidence]
     for e in items:
         write.guard("\n".join(e.to_dict().values()))
+    if weight is not None and not (isinstance(weight, (int, float)) and math.isfinite(weight) and 0 <= weight <= 1):
+        raise write.Refused("weight must be a number in 0..1")
     same = (src.ref, dst.ref, type)
     old = next((e for e in store.edges() if (e.source, e.target, e.type) == same and e.state != "invalidated"), None)
     if old:
@@ -50,19 +56,28 @@ def create(store: Store, source_ref: str, target_ref: str, type: str, *, evidenc
             write.add_evidence(old.path, e)
         return store.node(old.ref), False
     folder = src.path.parent
-    digest = hashlib.sha1("|".join(same).encode(), usedforsecurity=False).hexdigest()[:12]
+    old = sorted((e for e in store.edges() if (e.source, e.target, e.type) == same), key=lambda e: e.id)
+    key = "|".join(same + ((old[-1].id,) if old else ()))
+    digest = hashlib.sha1(key.encode(), usedforsecurity=False).hexdigest()[:12]
     today = date.today().isoformat()
     write.target(store, folder, "edges/x.md")
-    (folder / "edges").mkdir(exist_ok=True)
+    write.target(store, folder, "revisions/x.md")
     path = write.target(store, folder, f"edges/{today}-e{digest}.md")
-    if path.exists():  # an invalidated edge of the same triple lives there: keep it, start a new file
-        path = write.unique(path.with_suffix(""))
+    ref = path.relative_to(store.root).with_suffix("").as_posix()
+    write.guard("\n".join([ref, "edge created", by, type, state]))
     head = {"id": path.stem, "source": src.ref, "target": dst.ref, "type": type, "state": state,
             "weight": None if weight is None else str(weight), "created": today,
             "evidence": [e.to_dict() for e in items] or None}
-    write.create(path, dump({k: v for k, v in head.items() if v is not None}) + "\n")
-    ref = path.relative_to(store.root).with_suffix("").as_posix()
-    revision.record(store, folder, ref, "create", {}, {"type": type, "state": state}, "edge created", by)
+    text = dump({k: v for k, v in head.items() if v is not None}) + "\n"
+    write.guard(text)
+    (folder / "edges").mkdir(exist_ok=True)
+    if not write.create(path, text):
+        raise write.Refused("edge file already exists")
+    try:
+        revision.record(store, folder, ref, "create", {}, {"type": type, "state": state}, "edge created", by)
+    except Exception:
+        write.remove(path)
+        raise
     return store.node(ref), True
 
 
@@ -73,6 +88,13 @@ def set_state(store: Store, edge: Edge, state: str, reason: str, by: str, supers
     """
     if state not in EDGE_STATES:
         raise write.Refused(f"state must be one of {list(EDGE_STATES)}")
+    if not isinstance(edge, Edge) or not edge.ref or not isinstance(store.node(edge.ref), Edge):
+        raise write.Refused("not a stored edge")
+    if superseded_by:
+        match = [e for e in store.edges() if e.path.parent == edge.path.parent and superseded_by in (e.id, e.ref)]
+        if len(match) != 1 or match[0].ref == edge.ref:
+            raise write.Refused("superseded_by must be another edge of the same scope")
+        superseded_by = match[0].id
     write.guard(f"{reason}\n{by}\n{superseded_by or ''}")
     if (edge.state, superseded_by or "") == (state, ""):
         return

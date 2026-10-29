@@ -120,10 +120,13 @@ class Graph:
     def typed_edges(self) -> list[Edge]:
         """File edges of any state, then each memory's `[[links]]` as implicit validated related_to edges."""
         out = list(self.store.edges())
+        seen = {frozenset((e.source, e.target)) for e in out if e.type == "related_to"}
         for m in self._nodes.values():
             for slug in m.links:
                 key = self._target(m.env, slug)
-                if key and key != (m.env, m.slug):
+                pair = key and frozenset((m.ref, self._nodes[key].ref))
+                if key and key != (m.env, m.slug) and pair not in seen:
+                    seen.add(pair)
                     data = {"source": m.ref, "target": self._nodes[key].ref, "type": "related_to",
                             "state": "validated"}
                     out.append(_Implicit(f"link:{m.ref}>{slug}", Path(), m.env, m.repo, data))
@@ -141,9 +144,8 @@ class Graph:
         """
         out = []
         for k, m in self._nodes.items():
-            items = [e for e in m.evidence if e.kind == "supports"] or \
-                [Evidence(c.ref, "supports", 1.0) for c in self._contexts.get(k, [])]
-            exps = [e for e in items if isinstance(self.store.node(e.ref), Experience)]
+            items = m.evidence or [Evidence(c.ref, "supports", 1.0) for c in self._contexts.get(k, [])]
+            exps = [e for e in items if e.kind == "supports" and isinstance(self.store.node(e.ref), Experience)]
             n = len({evidence.independence_key(self.store, e) for e in exps})
             out.append((m, n, evidence.confidence(self.store, items) * n))
         out = [p for p in out if p[1] >= min_count]

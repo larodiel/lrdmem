@@ -111,6 +111,11 @@ def create(path: Path, text: str) -> bool:
     return True
 
 
+def remove(path: Path) -> None:
+    """Delete a file this process just created (rolling back a half-finished write); a missing file is fine."""
+    path.unlink(missing_ok=True)
+
+
 def unique(path_stem: Path) -> Path:
     """The first free `<stem>.md`, `<stem>-2.md`, `<stem>-3.md`, ...; pair with `create`, which stays exclusive."""
     path, n = path_stem.with_name(f"{path_stem.name}.md"), 1
