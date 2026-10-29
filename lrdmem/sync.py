@@ -52,7 +52,8 @@ def _git(repo: Path, *args: str, timeout: float = 30) -> str:
     return r.stdout.strip()
 
 
-def _toplevel(path: Path) -> Path | None:
+def toplevel(path: Path) -> Path | None:
+    """Resolved git toplevel of path, or None when path is not inside a git repository."""
     try:
         return Path(_git(path, "rev-parse", "--show-toplevel")).resolve()
     except _GitError:
@@ -69,13 +70,13 @@ def _targets(store: Store, env: str | None) -> list[tuple[str, Path | None, Path
     root = store.root.resolve()
     seen: dict[Path, str] = {}
     out = []
-    names = [None] if env == "_global" else [env] if env else [None, *store.environments()]  # "_global": root repo
+    names = [env] if env else [None, *store.environments()]  # "_global" alone: only _global/ of the root repo
     for name in names:
         path = store.root if name is None else store.root / name
         if name is not None and not path.is_dir():
             out.append((name, None, path))
             continue
-        top = _toplevel(path)
+        top = toplevel(path)
         # an env that is not its own repo is only synced as part of the store root repo
         if top is None or (top != path.resolve() and top != root):
             if name is not None:
@@ -149,7 +150,10 @@ def _sync_one(label: str, repo: Path, include: str, excludes: list[str], message
 
 
 def sync(store: Store, env: str | None = None, message: str | None = None) -> list[SyncResult]:
-    """Commit and push each repo (store root for _global, plus every env); only env's repo when given ("_global": root)."""
+    """Commit and push each repo (store root for _global, plus every env); only env's repo when given.
+
+    env "_global" stages only the _global/ folder of the root repo, never the rest of it.
+    """
     message = message or f"lrdmem: {config.load()['device']} {datetime.now():%Y-%m-%d %H:%M}"
     results = []
     for label, top, path in _targets(store, env):
@@ -159,7 +163,7 @@ def sync(store: Store, env: str | None = None, message: str | None = None) -> li
         # the root repo must not swallow envs that are repos of their own
         include = path.resolve().relative_to(top).as_posix()
         excludes = [n for n in store.environments() if include == "." and top == store.root.resolve()
-                    and _toplevel(store.root / n) != top]
+                    and toplevel(store.root / n) != top]
         results.append(_sync_one(label, top, include, excludes, message))
     return results
 

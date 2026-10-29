@@ -9,7 +9,7 @@ from unittest import mock
 
 from lrdmem.cli import main
 from lrdmem.store import Store
-from lrdmem.sync import SyncResult, autopush_enabled, pull, sync
+from lrdmem.sync import SyncResult, autopush_enabled, pull, sync, toplevel
 
 HERMETIC = {
     "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
@@ -232,16 +232,25 @@ class SyncTest(unittest.TestCase):
         self.assertIn("ab/x.md", files)
         self.assertNotIn("160000", files)
 
-    def test_global_target_is_the_root_repo_only(self):
+    def test_global_target_stages_only_global_folder(self):
         root = self.tmp / "s"
         write(root / "README.md", "r")
+        write(root / "_global" / "m.md", "m")
+        write(root / "plain" / "_global" / "x.md", "x")
         g(root, "init", "-q")
         g(root, "init", "-q", "own")
         write(root / "own" / "y.md", "y")
         self.assertEqual(sync(Store(root), "_global"), [SyncResult("_global", True, False, None)])
-        self.assertEqual(g(root, "ls-files").split(), ["README.md"])
+        self.assertEqual(g(root, "ls-files").split(), ["_global/m.md"])
         self.assertIn("?? y.md", g(root / "own", "status", "--porcelain"))
         self.assertIsNone(pull(Store(root), "_global"))
+
+    def test_toplevel_is_public(self):
+        root = self.tmp / "s"
+        g(self.tmp, "init", "-q", str(root))
+        (root / "d").mkdir()
+        self.assertEqual(toplevel(root / "d"), root.resolve())
+        self.assertIsNone(toplevel(self.tmp))
 
     def test_plain_envs_in_root_repo_are_one_result(self):
         root = self.tmp / "s"
