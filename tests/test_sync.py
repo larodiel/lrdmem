@@ -293,11 +293,14 @@ class SyncTest(unittest.TestCase):
         gitdir_holder.mkdir(parents=True, exist_ok=True)
         g(gitdir_holder, "init", "-q")
         with (gitdir_holder / ".git" / "config").open("a") as f:
-            f.write(f"[filter \"x\"]\n\tclean = sh -c 'touch {marker}; cat'\n\trequired = true\n")
+            f.write(f"[filter \"x\"]\n\tclean = \"touch {marker}; cat\"\n\trequired = true\n")
         write(folder / ".gitattributes", "* filter=x\n")
         write(folder / "q.md", "---\nid: q\n---\n")
         if as_file:
             (folder / ".git").write_text(f"gitdir: {gitdir_holder}/.git\n")
+        g(folder, "add", "-A")  # control: an unhardened git does fire the planted filter
+        self.assertTrue(marker.exists(), "the plant is not live")
+        marker.unlink()
 
     def test_nested_repo_with_filter_driver_is_refused(self):
         for as_file in (False, True):
@@ -308,6 +311,7 @@ class SyncTest(unittest.TestCase):
                 for _ in range(2):
                     (res,) = sync(store, "work")
                     self.assertIn("nested git repository inside the store", res.error)
+                    self.assertIn("move it out of the store", res.error)
                     self.assertIn("work/app/queue", res.error)
                 self.assertEqual(g(store.root / "work", "diff", "--cached", "--name-only"), "")
                 self.assertFalse(marker.exists())
@@ -327,7 +331,8 @@ class SyncTest(unittest.TestCase):
             return out
         with mock.patch("lrdmem.sync._git", plant):
             (res,) = sync(store, "work")
-        self.assertIn("nested git repository", res.error)
+        self.assertIn("gitlink", res.error)
+        self.assertIn("git rm --cached", res.error)
         self.assertNotIn("sub", g(work, "diff", "--cached", "--name-only"))
 
     def test_git_calls_are_hardened(self):

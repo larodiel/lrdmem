@@ -287,7 +287,7 @@ def lint(store: Store, env: str | None = None, git_checks: bool = False) -> list
         e, repo = store.scope_of(folder)
         known = stems.get(e, set()) | stems.get(None, set())
         files = {p.name for p in folder.glob("*.md")} - IGNORED
-        problems += [f"{p.relative_to(store.root)}: nested git repository inside the store; remove it"
+        problems += [f"{p.relative_to(store.root)}: nested git repository inside the store; move it out of the store"
                      for p in nested_git(folder)]
         problems += _index(store, folder, files)
         jobs = [(folder / n, Memory, _memory) for n in sorted(files)]

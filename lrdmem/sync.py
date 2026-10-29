@@ -79,9 +79,9 @@ def nested_git(base: Path, own: Path | None = None, prune: tuple = ()) -> list[P
         cur = Path(cur)
         dirs[:] = [d for d in dirs if cur / d not in prune and (cur / d).resolve() != own]
         for name in (*dirs, *files):
-            if name == ".git" and cur / name != own:
+            if name.lower() == ".git" and cur / name != own:
                 found.append(cur / name)
-        dirs[:] = [d for d in dirs if d != ".git"]
+        dirs[:] = [d for d in dirs if d.lower() != ".git"]
     return found
 
 
@@ -161,8 +161,10 @@ def _pull(repo: Path, label: str, timeout: float | None = None) -> str | None:
     return None
 
 
-def _nested_msg(path: Path) -> str:
-    return f"nested git repository inside the store: {path}; remove it"
+def _nested_msg(path: Path, gitlink: bool = False) -> str:
+    if gitlink:
+        return f"nested git repository inside the store (gitlink in the index): {path}; run git rm --cached on it"
+    return f"nested git repository inside the store: {path}; move it out of the store"
 
 
 def _sync_one(label: str, repo: Path, include: str, excludes: list[str], message: str,
@@ -184,7 +186,7 @@ def _sync_one(label: str, repo: Path, include: str, excludes: list[str], message
                      if line.startswith("160000")]
             if links:
                 _git(repo, "reset", "-q", "--", *(f":(literal){x}" for x in links))
-                return SyncResult(label, False, False, _nested_msg(repo / links[0]))
+                return SyncResult(label, False, False, _nested_msg(repo / links[0], gitlink=True))
             _git(repo, "commit", "-m", message)
             committed = True
         remotes = _git(repo, "remote").split()
