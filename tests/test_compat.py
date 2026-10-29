@@ -12,7 +12,7 @@ from tests.fixtures import make_store
 from tests.test_hooks import _Base
 
 SCOPED = ("---\nname: pr-gate\ndescription: 'TEC repos: proposal and design before every PR'\nmetadata:\n"
-          "  type: feedback\n  author: claude-code\n  updated: 2026-10-12\n---\n"
+          "  type: feedback\n  author: claude-code\n  updated: 2026-10-12\ntriggers:\n  paths: ['**/*.php']\n---\n"
           "Write the plan first; see [[app-notes]].\n\n\n**Why:** w\n**How to apply:** h\n")
 NOTES = ("---\nname: app-notes\ndescription: Notes about the app\nmetadata:\n  type: project\n"
          "  author: claude-code\n  updated: 2026-10-12\n---\nSee [[pr-gate]] too.\n\n\n**Why:** w\n**How to apply:** h\n")
@@ -38,6 +38,11 @@ class CompatTest(_Base):
         subprocess.run(["git", "init", "-q"], cwd=self.root / "work", check=True)
         (self.root / "personal").symlink_to(self.root / "elsewhere")
         os.environ["LRDMEM_STORE"] = str(self.root)
+
+    def test_environments(self):
+        envs = Store(self.root).environments()
+        self.assertNotIn("bin", envs)
+        self.assertIn("personal", envs)
 
     def test_lint_is_clean(self):
         self.assertEqual(lint(Store(self.root)), [])
