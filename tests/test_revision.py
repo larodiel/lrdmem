@@ -204,5 +204,55 @@ class RevisionFixRound1Test(unittest.TestCase):
         self.assertEqual(len(list((self.folder / "revisions").glob("*.md"))), 1)
 
 
+
+class RevisionFixRound2Test(unittest.TestCase):
+    setUp = RevisionTest.setUp
+    record = RevisionTest.record
+    promote = RevisionFixRound1Test.promote
+
+    def plant(self, name, text):
+        other = self.root / "beta/app"
+        (other / "revisions").mkdir(parents=True, exist_ok=True)
+        (other / "MEMORY.md").write_text("")
+        p = other / "revisions" / f"{name}.md"
+        p.write_text(text)
+        return p
+
+    def test_planted_foreign_revisions_cannot_drive_a_revert(self):
+        write.set_fields(self.mem, {"state": "active"})
+        self.plant("2020-01-01-ra", "---\nid: 2020-01-01-ra\ndate: 2020-01-01\ntarget: acme/web/m\n"
+                   "action: state_change\nbefore:\n  state: candidate\nafter:\n  state: active\nreason: r\nby: x\n---\n")
+        self.plant("2099-01-01-rb", "---\nid: 2099-01-01-rb\ndate: 2099-01-01\ntarget: acme/web/m\naction: revert\n"
+                   "before:\n  state: active\nafter:\n  state: candidate\nreason: revert 2020-01-01-ra\nby: h\n---\n")
+        with self.assertRaises(write.Refused):
+            revision.revert(self.store, "2020-01-01-ra", "h")
+        self.assertIn("  state: active\n", self.mem.read_text())
+        self.assertFalse((self.folder / "revisions").exists())
+
+    def test_foreign_revisions_do_not_salt_ids(self):
+        a = self.promote()
+        a.unlink()
+        self.plant("2099-01-01-rz", "---\nid: 2099-01-01-rz\ndate: 2099-01-01\ntarget: acme/web/m\n"
+                   "action: state_change\nbefore:\n  state: x\nafter:\n  state: y\nreason: r\nby: x\n---\n")
+        self.assertEqual(self.promote().name, a.name)
+
+    def test_revert_refuses_when_its_revision_already_exists(self):
+        rev = self.promote()
+        b = revision.revert(self.store, rev.stem, "h")
+        write.set_fields(self.mem, {"state": "active"})  # changed back by hand, nothing recorded
+        with self.assertRaises(write.Refused) as cm:
+            revision.revert(self.store, rev.stem, "h")
+        self.assertIn("nothing to revert", str(cm.exception))
+        self.assertIn("  state: active\n", self.mem.read_text())
+        self.assertEqual(len(list((self.folder / "revisions").glob("*.md"))), 2)
+        self.assertTrue(b.exists())
+
+    def test_non_string_values_refused(self):
+        for kw in ({"before": {"state": {"nested": "x"}}}, {"after": {"state": ["a"]}}, {"after": {"state": 1}}):
+            with self.subTest(kw), self.assertRaises(write.Refused):
+                self.record(**kw)
+        self.assertFalse((self.folder / "revisions").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

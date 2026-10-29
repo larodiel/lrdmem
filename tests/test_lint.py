@@ -297,6 +297,10 @@ class LintV2Test(unittest.TestCase):
             with self.subTest(path):
                 self.has(v2files(**{path: text}), "looks like it holds a credential")
 
+    def test_escaped_secret_in_nested_map(self):
+        pw = "pass" + "word\\n=hunter22xyz"
+        self.has(v2files(**{EXP: _exp(tags=f'[{{k: {{a: "{pw}"}}}}]')}), "looks like it holds a credential")
+
     def test_marker_missing_warns_only_with_v2_data(self):
         files = v2files()
         del files[".lrdmem-format"]

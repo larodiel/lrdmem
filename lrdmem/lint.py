@@ -45,6 +45,15 @@ def _strings(value):
         yield value
 
 
+_ESCAPE = re.compile(r"\\(u[0-9a-fA-F]{4}|.)")
+_ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "b": "\b", "f": "\f"}
+
+
+def _unescape(text: str) -> str:
+    """JSON-style escapes decoded: nested maps stay raw strings, so their quoted values keep `\\n`, `\\t`, `\\uXXXX`."""
+    return _ESCAPE.sub(lambda m: chr(int(m[1][1:], 16)) if len(m[1]) == 5 else _ESCAPES.get(m[1], m[1]), text)
+
+
 def has_secret(text: str) -> bool:
     """True when text, or any decoded frontmatter value in it (quoted values may hide escaped newlines/tabs),
     looks like it holds a credential."""
@@ -54,7 +63,7 @@ def has_secret(text: str) -> bool:
         data = split(text)[0]
     except ValueError:
         return False
-    return any(SECRET.search(v) for v in _strings(data))
+    return any(SECRET.search(v) or ("\\" in v and SECRET.search(_unescape(v))) for v in _strings(data))
 
 
 def _is_date(value) -> bool:

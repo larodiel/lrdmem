@@ -217,24 +217,47 @@ class WriteFixRound1Test(unittest.TestCase):
     def test_only_write_py_writes_store_files(self):
         """Every file-writing call in lrdmem/ sits in write.py, store.ensure_format or a known non-store writer."""
         allowed = {("store.py", "ensure_format"), ("config.py", "save"), ("session.py", "save"),
-                   ("install.py", "_write"), ("cli.py", "_graph"), ("claude.py", "link_claude_memory")}
+                   ("install.py", "_write"), ("cli.py", "_graph"), ("hooks/claude.py", "link_claude_memory")}
         # device config, session state, harness configs, graph --output, Claude's auto-memory link: not store content
+        pkg = Path(__file__).parent.parent / "lrdmem"
         found = set()
-        for path in sorted((Path(__file__).parent.parent / "lrdmem").rglob("*.py")):
-            if path.name != "write.py":
-                found |= {(path.name, fn) for fn in _writers(path.read_text())}
+        for path in sorted(pkg.rglob("*.py")):
+            rel = path.relative_to(pkg).as_posix()
+            if rel != "write.py":
+                found |= {(rel, fn) for fn in _writers(path.read_text())}
         self.assertTrue({("store.py", "ensure_format"), ("config.py", "save")} <= found)  # the scan is live
         self.assertEqual(found - allowed, set())
 
+    def test_writer_scan_sees_every_form(self):
+        for src in ("p.open('w')", "p.open(mode='a')", "open(p, 'x')", "os.fdopen(fd, 'r+')", "p.rename(q)",
+                    "p.replace(q)", "p.unlink()", "os.unlink(p)", "shutil.rmtree(p)", "os.replace(a, b)",
+                    "p.write_text('x')", "shutil.copy2(a, b)"):
+            with self.subTest(src):
+                self.assertEqual(_writers(f"def f():\n    {src}\n"), {"f"})
+        for src in ("p.open()", "p.open('r')", "open(p)", "s.replace('a', 'b')", "os.environ.copy()"):
+            with self.subTest(src):
+                self.assertEqual(_writers(f"def f():\n    {src}\n"), set())
 
-_WRITE_CALLS = {"write_text", "write_bytes", "symlink_to", "hardlink_to", "mkstemp", "touch"}
-_OWNED = {"os": {"open", "replace", "rename", "link", "symlink"}, "shutil": {"copy", "copy2", "copyfile", "move"}}
+    def test_nested_map_escapes_refused(self):
+        nested = "---\nid: c\nitems: [{k: {a: \"pass" + "word\\n=hunter22xyz\"}}]\n---\n"
+        with self.assertRaises(write.Refused):
+            write.create(self.folder / "c.md", nested)
+        self.assertFalse((self.folder / "c.md").exists())
+
+
+_WRITE_CALLS = {"write_text", "write_bytes", "symlink_to", "hardlink_to", "mkstemp", "touch", "unlink"}
+_OWNED = {"os": {"open", "replace", "rename", "link", "symlink", "unlink", "remove"},
+          "shutil": {"copy", "copy2", "copyfile", "move", "rmtree"}}
 
 
 def _writers(source: str) -> set[str]:
-    """Names of the functions (or <module>) holding a call that can write a file."""
+    """Names of the functions (or <module>) holding a call that can write, move or delete a file."""
     import ast
     out = set()
+
+    def mode(call, pos):
+        args = call.args[pos:pos + 1] + [k.value for k in call.keywords if k.arg == "mode"]
+        return "".join(str(a.value) for a in args if isinstance(a, ast.Constant))
 
     def visit(node, scope):
         for child in ast.iter_child_nodes(node):
@@ -243,10 +266,11 @@ def _writers(source: str) -> set[str]:
                 f = child.func
                 name = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", "")
                 owner = getattr(getattr(f, "value", None), "id", "")
-                modes = [a.value for a in child.args[1:2] + [k.value for k in child.keywords if k.arg == "mode"]
-                         if isinstance(a, ast.Constant)]
+                method = isinstance(f, ast.Attribute) and owner not in _OWNED
                 if (name in _WRITE_CALLS or name in _OWNED.get(owner, ())
-                        or (name in ("open", "fdopen") and any(set(str(m)) & set("wax+") for m in modes))):
+                        or (method and name in ("rename", "replace") and len(child.args) == 1)  # Path, not str
+                        or (name == "open" and set(mode(child, 0 if method else 1)) & set("wax+"))
+                        or (name == "fdopen" and set(mode(child, 1)) & set("wax+"))):
                     out.add(scope)
             visit(child, inner)
 
