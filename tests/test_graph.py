@@ -54,6 +54,23 @@ class GraphTest(unittest.TestCase):
         self.assertEqual([(m.slug, n) for m, n in self.g.hot()], [("phpcs", 3)])
         self.assertEqual(self.g.hot(4), [])
 
+    def test_hot_ranks_by_confidence_times_independent_support(self):
+        ev = ("evidence: [{ref: work/app/experiences/e1, kind: supports, weight: 0.2}, "
+              "{ref: work/app/experiences/e2, kind: supports, weight: 0.2}]\n")
+        files = {"work/app/many.md": _mem("many"), "work/app/same.md": _mem("same"),
+                 "work/app/withev.md": _mem("withev").replace("---\nwithev", "---\nwithev")}
+        files["work/app/withev.md"] = _mem("withev").replace("---\nbody", ev + "---\nbody")
+        for i, d in enumerate(["2026-01-01", "2026-01-02", "2026-01-03", "2026-01-04"]):
+            files[f"work/app/contexts/{d}-c{i}.md"] = _ctx(f"c{i}", d, ["many", "same"] if i < 3 else ["same"])
+        for i in (1, 2):
+            files[f"work/app/experiences/e{i}.md"] = (
+                f"---\nid: e{i}\ndate: 2026-02-0{i}\nkind: error\nagent: codex\n---\nx\n")
+        t = tempfile.TemporaryDirectory()
+        self.addCleanup(t.cleanup)
+        g = Graph(Store(make_store(Path(t.name), files)))
+        self.assertEqual([(m.slug, n) for m, n in g.hot(2)], [("same", 4), ("many", 3), ("withev", 2)])
+        self.assertEqual([m.slug for m, _ in g.hot(4)], ["same"])
+
     def test_contexts_sorted_by_date(self):
         self.assertEqual([c.date for c in self.g.contexts_of("phpcs", env="work")],
                          ["2026-01-01", "2026-02-01", "2026-03-01"])

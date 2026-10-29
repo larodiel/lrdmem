@@ -2,7 +2,11 @@
 
 from collections import defaultdict
 
-from lrdmem.store import Context, Memory, Store
+from pathlib import Path
+
+from lrdmem import evidence
+from lrdmem.model import Evidence
+from lrdmem.store import Context, Edge, Experience, Memory, Store
 
 _Key = tuple[str | None, str]
 
@@ -13,6 +17,14 @@ class AmbiguousSlug(Exception):
     def __init__(self, slug: str, candidates: list[Memory]):
         super().__init__(f"'{slug}' exists in several environments; pass --env")
         self.candidates = candidates
+
+
+class _Implicit(Edge):
+    """A `[[link]]` read as a validated related_to edge; it has no file."""
+
+    @property
+    def ref(self) -> str:
+        return ""
 
 
 class Graph:
@@ -105,7 +117,34 @@ class Graph:
         ]
         return mems + sorted(ctxs, key=lambda c: c.date)
 
+    def typed_edges(self) -> list[Edge]:
+        """File edges of any state, then each memory's `[[links]]` as implicit validated related_to edges."""
+        out = list(self.store.edges())
+        for m in self._nodes.values():
+            for slug in m.links:
+                key = self._target(m.env, slug)
+                if key and key != (m.env, m.slug):
+                    data = {"source": m.ref, "target": self._nodes[key].ref, "type": "related_to",
+                            "state": "validated"}
+                    out.append(_Implicit(f"link:{m.ref}>{slug}", Path(), m.env, m.repo, data))
+        return out
+
+    def neighbours(self, ref: str, states: tuple[str, ...] = ("validated", "proposed")) -> list[tuple[Edge, str]]:
+        """(edge, other end) for typed edges touching ref, limited to the given states."""
+        return [(e, e.target if e.source == ref else e.source) for e in self.typed_edges()
+                if ref in (e.source, e.target) and e.state in states]
+
     def hot(self, min_count: int = 3) -> list[tuple[Memory, int]]:
-        """Memories reinforced by at least min_count contexts, strongest first."""
-        out = [(m, len(self._contexts.get(k, []))) for k, m in self._nodes.items()]
-        return sorted((p for p in out if p[1] >= min_count), key=lambda p: (-p[1], p[0].slug))
+        """(memory, independent supporting experiences) with at least min_count, best first.
+
+        Ranked by `evidence.confidence` x that count. A memory without an evidence list counts its contexts instead.
+        """
+        out = []
+        for k, m in self._nodes.items():
+            items = [e for e in m.evidence if e.kind == "supports"] or \
+                [Evidence(c.ref, "supports", 1.0) for c in self._contexts.get(k, [])]
+            exps = [e for e in items if isinstance(self.store.node(e.ref), Experience)]
+            n = len({evidence.independence_key(self.store, e) for e in exps})
+            out.append((m, n, evidence.confidence(self.store, items) * n))
+        out = [p for p in out if p[1] >= min_count]
+        return [(m, n) for m, n, _ in sorted(out, key=lambda p: (-p[2], p[0].slug))]
