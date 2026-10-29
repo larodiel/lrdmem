@@ -41,8 +41,8 @@ def terms(text: str) -> set[str]:
     return {w for w in re.split(r"[^a-z0-9]+", text.lower()) if len(w) >= 4 and w not in _STOP}
 
 
-def _folder(store: Store, cwd: Path, scope: str, env: str | None) -> tuple[Path, str | None]:
-    """The target folder and the env it is visible from."""
+def scope_folder(store: Store, cwd: Path, scope: str, env: str | None) -> tuple[Path, str | None]:
+    """The scope folder for repo/env/global and the env it is visible from; LearnRefused when not opted in."""
     if scope == "global":
         return store.root / "_global", None
     if env is not None and env not in store.environments():
@@ -113,7 +113,7 @@ def learn(store: Store, cwd: Path, *, memory: str, mistake: str, correction: str
                   for i, v in enumerate(vals)}}
     if any("\n" in v or "\r" in v for v in oneline.values()):
         raise LearnRefused("agent, device, pr, description, files and triggers must be single-line")
-    folder, vis_env = _folder(store, cwd, scope, env)
+    folder, vis_env = scope_folder(store, cwd, scope, env)
     path = folder / f"{memory}.md"
     exists = path.exists()
     if not exists and not all(v and v.strip() for v in (description, body, why, how)):

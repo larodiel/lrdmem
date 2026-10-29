@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from lrdmem import __version__, checks, config, revision
+from lrdmem import __version__, checks, config, experience, revision
 from lrdmem.export import to_dot, to_html, to_json
 from lrdmem.graph import AmbiguousSlug, Graph
 from lrdmem.hooks import HookInput, dispatch, handle
@@ -168,6 +168,40 @@ def _learn(store: Store, g: Graph, args) -> int:
     _out(r.context.relative_to(store.root).as_posix())
     if r.created:
         _out(r.memory.relative_to(store.root).as_posix())
+    return 0
+
+
+def _experience(store: Store, g: Graph, args) -> int:
+    fields = {"kind": args.kind, "agent": args.agent, "scope": args.scope, "files": args.files,
+              "source": args.source, "ref": args.ref, "request_id": args.request_id, "env": args.env}
+    try:
+        piped = "" if sys.stdin.isatty() else sys.stdin.read()
+        if args.text is not None:
+            if piped.strip():
+                raise experience.Refused("give the text as an argument or as JSON on stdin, not both")
+            fields["text"] = args.text
+        elif piped.strip():
+            try:
+                raw = json.loads(piped)
+            except ValueError:
+                raise experience.Refused("stdin is not valid JSON") from None
+            if not isinstance(raw, dict) or not set(raw) <= {"text", *fields}:
+                raise experience.Refused("stdin must be a JSON object with the experience keys")
+            fields = {**{k: v for k, v in fields.items() if v not in (None, [])}, **raw}
+            if (not isinstance(fields.get("files") or [], list) or not all(isinstance(f, str) for f in fields.get("files") or [])
+                    or not all(v is None or isinstance(v, str) for k, v in fields.items() if k != "files")):
+                raise experience.Refused("JSON values must be strings (files: a list of strings)")
+        if not isinstance(fields.get("text"), str):
+            raise experience.Refused("text is required (argument or JSON on stdin)")
+        e, created = experience.add(
+            store, Path.cwd(), kind=fields.get("kind") or "", agent=fields.get("agent") or "", text=fields["text"],
+            scope=fields.get("scope") or "repo", files=fields.get("files") or [],
+            source=fields.get("source") or "chat", ref=fields.get("ref"), request_id=fields.get("request_id"),
+            env=fields.get("env"), device=config.load()["device"])
+    except experience.Refused as err:
+        print(printable(str(err)), file=sys.stderr)
+        return 1
+    _out(e.ref + ("" if created else " (existing)"))
     return 0
 
 
@@ -371,6 +405,19 @@ def _main(argv: list[str] | None) -> int:
         p.add_argument(f"--{name}", action="append", help=f"new memory: triggers.{name} (repeat or comma-separate)")
     p.add_argument("--env")
     p.add_argument("--new", action="store_true")
+    p = sub.add_parser("experience", help="record experiences (immutable observations)")
+    esub = p.add_subparsers(dest="action", required=True)
+    q = esub.add_parser("add", help="record an experience; text as argument or a JSON object on stdin")
+    q.set_defaults(fn=_experience)
+    q.add_argument("--kind")
+    q.add_argument("--agent")
+    q.add_argument("--scope", choices=["repo", "env", "global"])
+    q.add_argument("--files", nargs="*", default=[])
+    q.add_argument("--source", choices=["chat", "pr", "run", "check"])
+    q.add_argument("--ref")
+    q.add_argument("--request-id", dest="request_id")
+    q.add_argument("--env")
+    q.add_argument("text", nargs="?")
     p = sub.add_parser("learn-pr", help="link a GitHub PR's review comments to the memories they reinforce")
     p.set_defaults(fn=_learn_pr)
     p.add_argument("url")
