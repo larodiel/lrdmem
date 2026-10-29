@@ -28,5 +28,20 @@ Priority: optional
 Homepage: https://github.com/larodiel/lrdmem
 Description: Shared git-backed memory store for AI coding agents
 CTL
+cat > "$stage/DEBIAN/postinst" <<'SH'
+#!/bin/sh
+set -e
+if command -v py3compile >/dev/null; then py3compile -p lrdmem; fi
+exit 0
+SH
+cat > "$stage/DEBIAN/prerm" <<'SH'
+#!/bin/sh
+set -e
+if command -v py3clean >/dev/null; then py3clean -p lrdmem; fi
+exit 0
+SH
+chmod 755 "$stage/DEBIAN/postinst" "$stage/DEBIAN/prerm"
 find "$stage" -type d -exec chmod 755 {} +
+find "$lib" -type f -exec chmod 644 {} +
+chmod 644 "$stage/DEBIAN/control"
 dpkg-deb --root-owner-group --build "$stage" "$root/dist/lrdmem_${version}_all.deb"

@@ -9,6 +9,8 @@ class Lrdmem < Formula
 
   depends_on "python@3.13"
 
+  # No resources: lrdmem has no runtime deps. pip_install builds the sdist with build isolation
+  # (default), so pip fetches setuptools itself; no setuptools resource or depends_on is needed.
   def install
     virtualenv_install_with_resources
   end
