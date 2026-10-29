@@ -36,9 +36,10 @@ class CliTest(unittest.TestCase):
         self.assertEqual(data["tool"]["setuptools"]["dynamic"]["version"], {"attr": "lrdmem.__version__"})
 
 
-    def test_readme_documents_the_cli(self):
+    def test_docs_document_the_cli(self):
         from pathlib import Path
-        text = (Path(__file__).parent.parent / "README.md").read_text()
+        root = Path(__file__).parent.parent
+        text = (root / "README.md").read_text() + (root / "docs" / "guide.md").read_text()
         for needle in ("kind: obligation", "check:", "lrdmem allow", "lrdmem check --on", "config autopush",
                        "learn-pr", "collaborators", "GitHub remote", "--why", "--how", "--paths", "--repos",
                        "install --agent opencode` copies the plugin"):
