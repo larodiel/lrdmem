@@ -21,3 +21,8 @@ All three run the same handlers through `lrdmem hook <phase> --agent claude|code
   blocking stop, so `check.on: stop` obligations run after each edit, like `post-edit`; the end of a session
   execution only syncs. The plugin stops waiting for lrdmem after 5 s per hook, so a check slower than that
   reports nothing in OpenCode.
+
+`lrdmem install --agent claude|codex|opencode [--dry-run]` wires this up and installs the skill (Claude
+`~/.claude/skills/lrdmem/`, Codex `~/.agents/skills/lrdmem/`, OpenCode `~/.config/opencode/skills/lrdmem/`).
+OpenCode also reads the Claude and `~/.agents` skill folders, so after installing for several agents it may list
+the lrdmem skill twice; that is harmless.

@@ -14,6 +14,7 @@ _SKILL = _HERE / "skill" / "SKILL.md"
 _PLUGIN = _HERE / "hooks" / "opencode-plugin.js"
 _BIN_MARKER = 'process.env.LRDMEM_BIN || "lrdmem"'
 _OLD_TOOL = "bin/memory context"
+_TIMEOUT = {"stop": 330}  # seconds; stop checks may take 300 s. Claude and Codex both read `timeout` in seconds.
 _EDITS = "Edit|Write|MultiEdit|NotebookEdit"
 # (event, matcher, phase); Codex reports file edits as apply_patch (Edit/Write are only matcher aliases there).
 _EVENTS = {
@@ -37,17 +38,18 @@ class InstallError(Exception):
 
 def _bin() -> str:
     """The lrdmem executable running now, as an absolute path, or plain `lrdmem`."""
-    argv0 = sys.argv[0] if Path(sys.argv[0]).name == "lrdmem" else None
-    found = argv0 or shutil.which("lrdmem")
+    argv0 = sys.argv[0]
+    found = argv0 if os.sep in argv0 and Path(argv0).name == "lrdmem" else shutil.which("lrdmem")
     return os.path.abspath(found) if found else "lrdmem"
 
 
 def _ours(cmd: str, agent: str) -> bool:
     try:
-        first = shlex.split(cmd)[0]
-    except (ValueError, IndexError):
+        tokens = shlex.split(cmd)
+    except ValueError:
         return False
-    return " hook " in cmd and f"--agent {agent}" in cmd and Path(first).name == "lrdmem"
+    pairs = list(zip(tokens, tokens[1:]))
+    return bool(tokens) and Path(tokens[0]).name == "lrdmem" and "hook" in tokens and ("--agent", agent) in pairs
 
 
 def _drop(hook, agent: str) -> bool:
@@ -90,7 +92,8 @@ def _hooks_plan(agent: str, path: Path, command: str) -> tuple[bytes | None, lis
     new, notes = dict(hooks), []
     for event, matcher, phase in _EVENTS[agent]:
         cmd = f"{command} hook {phase} --agent {agent}"
-        want = ({"matcher": matcher} if matcher else {}) | {"hooks": [{"type": "command", "command": cmd}]}
+        want = ({"matcher": matcher} if matcher else {}) | {"hooks": [{"type": "command", "command": cmd,
+                                                                         "timeout": _TIMEOUT.get(phase, 10)}]}
         old = hooks.get(event, [])
         if not isinstance(old, list):
             raise InstallError(f"{path}: hooks.{event} is not a list; nothing changed")
@@ -103,6 +106,27 @@ def _hooks_plan(agent: str, path: Path, command: str) -> tuple[bytes | None, lis
         return None, []
     text = json.dumps({**data, "hooks": new}, indent=2, ensure_ascii=False) + "\n"
     return text.encode(), notes
+
+
+def _target(path: Path) -> Path:
+    """Where writing path really lands (through symlinks); InstallError if a link is broken or a parent is a file."""
+    for p in [*reversed(path.parents), path]:
+        if p.is_symlink() and not p.exists():
+            raise InstallError(f"{p} is a broken symlink; fix or remove it, then run install again")
+        if p != path and p.exists() and not p.is_dir():
+            raise InstallError(f"{p} is not a directory; nothing changed")
+    return path.resolve()
+
+
+def _lrdmem_skill(path: Path) -> bool:
+    """True when path holds a skill lrdmem installed (frontmatter `name: lrdmem`)."""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError):
+        return False
+    if not lines or lines[0] != "---" or "---" not in lines[1:]:
+        return False
+    return "name: lrdmem" in (ln.strip() for ln in lines[1:lines.index("---", 1)])
 
 
 def _write(path: Path, content: bytes, backup: bool) -> None:
@@ -136,15 +160,20 @@ def install(agent: str, home: Path, dry_run: bool = False) -> list[str]:
     command = shlex.quote(_bin())
     plan: list[tuple[Path, bytes, bool, list[str]]] = []  # (target, content, back up first, change notes)
     if agent in _HOOKS_FILE:
-        path = (home / _HOOKS_FILE[agent]).resolve()  # a symlinked config is edited through its target
+        path = _target(home / _HOOKS_FILE[agent])  # a symlinked config is edited through its target
         content, notes = _hooks_plan(agent, path, command)
         if content is not None:
             plan.append((path, content, True, notes or [f"{path}: rewrite"]))
     else:
-        plugin = _PLUGIN.read_text(encoding="utf-8").replace(
-            _BIN_MARKER, f"process.env.LRDMEM_BIN || {json.dumps(_bin())}")
-        plan.append((home / ".config/opencode/plugins/lrdmem.js", plugin.encode(), False, []))
-    plan.append((home / _SKILL_DIR[agent] / "SKILL.md", _SKILL.read_bytes(), False, []))
+        plugin = _PLUGIN.read_text(encoding="utf-8")
+        if _BIN_MARKER not in plugin:
+            raise InstallError(f"{_PLUGIN} lacks `{_BIN_MARKER}`; this lrdmem build is broken")
+        plugin = plugin.replace(_BIN_MARKER, f"process.env.LRDMEM_BIN || {json.dumps(_bin())}")
+        plan.append((_target(home / ".config/opencode/plugins/lrdmem.js"), plugin.encode(), False, []))
+    skill = _target(home / _SKILL_DIR[agent] / "SKILL.md")
+    foreign = skill.is_file() and not _lrdmem_skill(skill)  # someone else's SKILL.md: keep a backup
+    plan.append((skill, _SKILL.read_bytes(), foreign, [f"write {skill}" + (" (backing up the existing file)"
+                                                                          if foreign else "")]))
     plan = [p for p in plan if not (p[0].is_file() and p[0].read_bytes() == p[1])]
     if not dry_run:
         for path, content, backup, _ in plan:

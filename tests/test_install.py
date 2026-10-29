@@ -11,7 +11,10 @@ from pathlib import Path
 from unittest import mock
 
 from lrdmem.cli import main
-from lrdmem.install import InstallError, install
+from lrdmem import install as install_mod
+from lrdmem.install import InstallError, _bin, install
+
+BIN = "/opt/lrdmem/bin/lrdmem"
 
 # A realistic entry: several hooks in one group, unknown keys, the old tool next to an unrelated hook.
 UNRELATED = {"matcher": "Bash", "hooks": [
@@ -42,6 +45,9 @@ class _Home(unittest.TestCase):
     def setUp(self):
         self.home = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.home)
+        patcher = mock.patch.object(install_mod, "_bin", return_value=BIN)  # hermetic: never what `which` finds
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def put(self, rel, data):
         p = self.home / rel
@@ -98,11 +104,36 @@ class ClaudeInstallTest(_Home):
     def test_absolute_quoted_command_replaces_earlier_entry(self):
         p = self.put(".claude/settings.json", SETTINGS)
         install("claude", self.home)
-        with mock.patch.object(sys, "argv", ["/opt/my tools/bin/lrdmem"]):
+        with mock.patch.object(install_mod, "_bin", return_value="/opt/my tools/bin/lrdmem"):
             changes = install("claude", self.home)
-        self.assertIn(f"{p.resolve()}: Stop remove `lrdmem hook stop --agent claude`", changes)
+        self.assertIn(f"{p.resolve()}: Stop remove `{BIN} hook stop --agent claude`", changes)
         self.assertEqual(commands(json.loads(p.read_text()), "Stop"),
                          ["'/opt/my tools/bin/lrdmem' hook stop --agent claude"])
+
+    def test_timeouts(self):
+        install("claude", self.home)
+        hooks = json.loads((self.home / ".claude/settings.json").read_text())["hooks"]
+        self.assertEqual({e: g[0]["hooks"][0]["timeout"] for e, g in hooks.items()},
+                         {"SessionStart": 10, "PreToolUse": 10, "PostToolUse": 10, "UserPromptSubmit": 10,
+                          "Stop": 330})
+
+    def test_agent_compared_as_token(self):
+        other = {"hooks": [{"type": "command", "command": "lrdmem hook stop --agent claude-next"}]}
+        p = self.put(".claude/settings.json", {"hooks": {"Stop": [other]}})
+        install("claude", self.home)
+        self.assertEqual(json.loads(p.read_text())["hooks"]["Stop"][0], other)
+
+    def test_dangling_skill_dir_refused_before_any_write(self):
+        self.put(".claude/settings.json", SETTINGS)
+        link = self.home / ".claude/skills/lrdmem"
+        link.parent.mkdir(parents=True)
+        link.symlink_to(self.home / "gone")
+        snap = self.snapshot()
+        with self.assertRaises(InstallError) as cm:
+            install("claude", self.home)
+        self.assertIn("broken symlink", str(cm.exception))
+        self.assertEqual(self.snapshot(), snap)
+        self.assertFalse((self.home / "gone").exists())
 
     def test_backup_not_overwritten(self):
         p = self.put(".claude/settings.json", SETTINGS)
@@ -147,6 +178,51 @@ class ClaudeInstallTest(_Home):
         self.assertEqual(self.snapshot(), snap)
 
 
+class SkillInstallTest(_Home):
+    def link_skill(self, text):
+        real = self.home / "dotfiles/SKILL.md"
+        real.parent.mkdir(parents=True)
+        real.write_text(text)
+        link = self.home / ".agents/skills/lrdmem/SKILL.md"
+        link.parent.mkdir(parents=True)
+        link.symlink_to(real)
+        return real, link
+
+    def test_symlinked_user_skill_written_through_link_and_backed_up(self):
+        real, link = self.link_skill("---\nname: mine\n---\nmy notes\n")
+        install("codex", self.home)
+        self.assertTrue(link.is_symlink())
+        self.assertTrue(real.read_text().startswith("---\nname: lrdmem\n"))
+        bak = real.with_name(f"SKILL.md.bak-{date.today().isoformat()}")
+        self.assertEqual(bak.read_text(), "---\nname: mine\n---\nmy notes\n")
+
+    def test_older_lrdmem_skill_replaced_without_backup(self):
+        real, _ = self.link_skill("---\nname: lrdmem\ndescription: old\n---\nold body\n")
+        install("codex", self.home)
+        self.assertFalse(real.with_name(f"SKILL.md.bak-{date.today().isoformat()}").exists())
+        self.assertIn("lrdmem why", real.read_text())
+
+    def test_directory_link_kept(self):
+        real = self.home / "dotfiles/lrdmem-skill"
+        real.mkdir(parents=True)
+        link = self.home / ".claude/skills/lrdmem"
+        link.parent.mkdir(parents=True)
+        link.symlink_to(real)
+        install("claude", self.home)
+        self.assertTrue(link.is_symlink())
+        self.assertTrue((real / "SKILL.md").is_file())
+
+
+class BinTest(unittest.TestCase):
+    def test_resolution(self):
+        with mock.patch.object(sys, "argv", ["/x/bin/lrdmem"]), mock.patch("shutil.which", return_value="/w/lrdmem"):
+            self.assertEqual(_bin(), "/x/bin/lrdmem")
+        with mock.patch.object(sys, "argv", ["lrdmem"]), mock.patch("shutil.which", return_value="/w/lrdmem"):
+            self.assertEqual(_bin(), "/w/lrdmem")
+        with mock.patch.object(sys, "argv", ["/x/lrdmem/__main__.py"]), mock.patch("shutil.which", return_value=None):
+            self.assertEqual(_bin(), "lrdmem")
+
+
 class CodexInstallTest(_Home):
     def test_hooks_json(self):
         p = self.put(".codex/hooks.json", {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "x"}]}]}})
@@ -156,6 +232,7 @@ class CodexInstallTest(_Home):
         self.assertIn(" hook stop --agent codex", hooks["Stop"][1]["hooks"][0]["command"])
         self.assertEqual(hooks["PreToolUse"][0]["matcher"], "apply_patch|Bash")
         self.assertEqual(hooks["PostToolUse"][0]["matcher"], "apply_patch")
+        self.assertEqual(hooks["Stop"][1]["hooks"][0]["timeout"], 330)
         self.assertTrue((self.home / ".agents/skills/lrdmem/SKILL.md").is_file())
         self.assertEqual(install("codex", self.home), [])
 
@@ -164,10 +241,17 @@ class OpenCodeInstallTest(_Home):
     def test_plugin_and_skill(self):
         install("opencode", self.home)
         plugin = (self.home / ".config/opencode/plugins/lrdmem.js").read_text()
-        self.assertIn("process.env.LRDMEM_BIN ||", plugin)
+        self.assertIn(f'process.env.LRDMEM_BIN || "{BIN}"', plugin)
         self.assertIn('id: "lrdmem"', plugin)
         self.assertTrue((self.home / ".config/opencode/skills/lrdmem/SKILL.md").is_file())
         self.assertEqual(install("opencode", self.home), [])
+
+    def test_plugin_marker_missing_fails_loudly(self):
+        js = self.home / "plugin.js"
+        js.write_text('spawn("lrdmem")\n')
+        with mock.patch.object(install_mod, "_PLUGIN", js), self.assertRaises(InstallError):
+            install("opencode", self.home)
+        self.assertFalse((self.home / ".config").exists())
 
 
 class SkillTest(unittest.TestCase):
@@ -188,13 +272,8 @@ class SkillTest(unittest.TestCase):
 class CliInstallTest(_Home):
     def run_cli(self, *argv):
         out, err = io.StringIO(), io.StringIO()
-        old = os.environ.get("HOME")
-        os.environ["HOME"] = str(self.home)
-        try:
-            with redirect_stdout(out), redirect_stderr(err):
-                code = main(["install", *argv])
-        finally:
-            os.environ["HOME"] = old
+        with mock.patch.dict(os.environ, {"HOME": str(self.home)}), redirect_stdout(out), redirect_stderr(err):
+            code = main(["install", *argv])
         return code, out.getvalue(), err.getvalue()
 
     def test_dry_run_output(self):
