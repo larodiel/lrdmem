@@ -172,25 +172,32 @@ def _learn(store: Store, g: Graph, args) -> int:
 
 
 def _experience(store: Store, g: Graph, args) -> int:
-    fields = {"kind": args.kind, "agent": args.agent, "scope": args.scope, "files": args.files,
-              "source": args.source, "ref": args.ref, "request_id": args.request_id, "env": args.env}
+    flags = {"kind": args.kind, "agent": args.agent, "scope": args.scope, "files": _csv(args.files) or None,
+             "source": args.source, "ref": args.ref, "request_id": args.request_id, "env": args.env}
+    fields = {k: v for k, v in flags.items() if v is not None}
     try:
-        piped = "" if sys.stdin.isatty() else sys.stdin.read()
-        if args.text is not None:
-            if piped.strip():
-                raise experience.Refused("give the text as an argument or as JSON on stdin, not both")
+        if args.text is not None:  # never touch stdin: a harness may leave an open pipe there
             fields["text"] = args.text
-        elif piped.strip():
+        else:
             try:
-                raw = json.loads(piped)
-            except ValueError:
-                raise experience.Refused("stdin is not valid JSON") from None
-            if not isinstance(raw, dict) or not set(raw) <= {"text", *fields}:
-                raise experience.Refused("stdin must be a JSON object with the experience keys")
-            fields = {**{k: v for k, v in fields.items() if v not in (None, [])}, **raw}
-            if (not isinstance(fields.get("files") or [], list) or not all(isinstance(f, str) for f in fields.get("files") or [])
-                    or not all(v is None or isinstance(v, str) for k, v in fields.items() if k != "files")):
-                raise experience.Refused("JSON values must be strings (files: a list of strings)")
+                piped = "" if sys.stdin is None or sys.stdin.isatty() else sys.stdin.read()
+            except (OSError, UnicodeDecodeError):
+                raise experience.Refused("could not read stdin as UTF-8 text") from None
+            if piped.strip():
+                try:
+                    raw = json.loads(piped)
+                except ValueError:
+                    raise experience.Refused("stdin is not valid JSON") from None
+                if not isinstance(raw, dict) or not set(raw) <= {"text", *flags}:
+                    raise experience.Refused("stdin must be a JSON object with the experience keys")
+                if (not isinstance(raw.get("files") or [], list)
+                        or not all(isinstance(f, str) for f in raw.get("files") or [])
+                        or not all(v is None or isinstance(v, str) for k, v in raw.items() if k != "files")):
+                    raise experience.Refused("JSON values must be strings (files: a list of strings)")
+                clash = sorted(set(raw) & set(fields))
+                if clash:
+                    raise experience.Refused(f"{', '.join(clash)} given both as flag and in JSON; use one")
+                fields.update({k: v for k, v in raw.items() if v is not None})
         if not isinstance(fields.get("text"), str):
             raise experience.Refused("text is required (argument or JSON on stdin)")
         e, created = experience.add(
@@ -412,7 +419,7 @@ def _main(argv: list[str] | None) -> int:
     q.add_argument("--kind")
     q.add_argument("--agent")
     q.add_argument("--scope", choices=["repo", "env", "global"])
-    q.add_argument("--files", nargs="*", default=[])
+    q.add_argument("--files", action="append", help="repeat or comma-separate")
     q.add_argument("--source", choices=["chat", "pr", "run", "check"])
     q.add_argument("--ref")
     q.add_argument("--request-id", dest="request_id")

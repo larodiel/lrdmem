@@ -33,6 +33,12 @@ def guard(text: str) -> None:
         raise Refused("content looks like it holds a credential; sensitive data never enters the store")
 
 
+def refuse_home_paths(text: str, scope: str) -> None:
+    """Raise Refused when text holds the home directory path and the scope is shared (anything but global)."""
+    if scope != "global" and str(Path.home()) in text:
+        raise Refused("text contains the home directory path, which must not enter a shared environment")
+
+
 def target(store: Store, scope_folder: Path, rel: str) -> Path:
     """The path `rel` inside a scope folder, after the format guard; Refused when it could write outside the scope.
 

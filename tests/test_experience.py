@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 import tempfile
+import threading
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timezone
@@ -40,7 +41,7 @@ class ExperienceTest(_Base):
     def test_writes_file_with_spec_fields(self):
         e, created = self.add(when=WHEN, files=["a.py"], ref="http://x/1", request_id="r1", device="mac")
         self.assertTrue(created)
-        path = self.root / "acme/web/experiences/2026-10-29-chose-spaces-over-tabs-for-indentation.md"
+        path = self.root / "acme/web/experiences/2026-10-29-req-5573e39b6600.md"  # sha1("r1")[:12]
         self.assertEqual(e.path, path)
         data = parse(path.read_text())
         self.assertEqual(data, {"id": path.stem, "date": "2026-10-29T14:03:00Z", "kind": "decision", "agent": "claude",
@@ -49,6 +50,10 @@ class ExperienceTest(_Base):
         self.assertIn(KW["text"], path.read_text().split("---\n")[-1])
         self.assertEqual(e.ref, "acme/web/experiences/" + path.stem)
         self.assertEqual([x.path for x in self.store.experiences()], [path])
+
+    def test_slug_id_without_request_id(self):
+        e, _ = self.add(when=WHEN)
+        self.assertEqual(e.id, "2026-10-29-chose-spaces-over-tabs-for-indentation")
 
     def test_same_day_same_text_gets_unique_id(self):
         a, _ = self.add(when=WHEN)
@@ -84,13 +89,52 @@ class ExperienceTest(_Base):
         self.assertEqual(self.files(), [])
         self.assertFalse(list(self.root.glob("**/experiences")))
 
+    def test_request_id_race_writes_one_file(self):
+        results = []
+        barrier = threading.Barrier(8)
+
+        def go():
+            barrier.wait()
+            results.append(self.add(request_id="race", when=WHEN)[1])
+        ts = [threading.Thread(target=go) for _ in range(8)]
+        [t.start() for t in ts]
+        [t.join() for t in ts]
+        self.assertEqual(sorted(results), [False] * 7 + [True])
+        self.assertEqual(len(self.files()), 1)
+        self.assertRegex(self.files()[0].name, r"^2026-10-29-req-[0-9a-f]{12}\.md$")
+
+    def test_request_id_dedupes_across_days(self):
+        a, _ = self.add(request_id="r9", when=WHEN)
+        b, created = self.add(request_id="r9", when=datetime(2026, 11, 2, tzinfo=timezone.utc))
+        self.assertEqual((created, b.path), (False, a.path))
+
+    def test_home_paths_refused_outside_global(self):
+        home = str(Path.home())
+        for kw in (dict(text=f"edited {home}/x"), dict(files=[f"{home}/x"]), dict(ref=f"{home}/y")):
+            with self.subTest(kw=kw), self.assertRaises(experience.Refused):
+                self.add(**kw)
+            with self.assertRaises(experience.Refused):
+                self.add(scope="env", **kw)
+        self.assertEqual(self.files(), [])
+        self.add(scope="global", text=f"edited {home}/x")
+
+    def test_control_chars_in_files_refused(self):
+        for f in ("a\x00b", "a\x1bb", "a\tb"):
+            with self.subTest(f=f), self.assertRaises(experience.Refused):
+                self.add(files=[f])
+
+    def test_experiences_dir_is_a_file(self):
+        (self.root / "acme/web/experiences").write_text("x")
+        with self.assertRaises(experience.Refused):
+            self.add()
+
     def test_refused_is_write_refused_and_no_edit_api(self):
         from lrdmem import write
         self.assertTrue(issubclass(experience.Refused, write.Refused))
         self.assertEqual([n for n in dir(experience) if n in ("update", "edit", "set", "delete", "remove")], [])
 
 
-class ExperienceCliTest(ExperienceTest):
+class ExperienceCliTest(_Base):
     def run_cli(self, argv, stdin=""):
         out, err = io.StringIO(), io.StringIO()
         sin = io.StringIO(stdin)
@@ -116,11 +160,47 @@ class ExperienceCliTest(ExperienceTest):
         self.assertEqual((code, out2), (0, out + " (existing)"))
         self.assertEqual(len(self.files()), 1)
 
-    def test_text_and_stdin_refused(self):
-        code, _, err = self.run_cli(["--kind", "error", "--agent", "a", "t"], '{"text": "u"}')
+    def test_text_never_touches_stdin(self):
+        r, w = os.pipe()  # write end stays open: reading would block forever
+        self.addCleanup(os.close, w)
+        out, err = io.StringIO(), io.StringIO()
+        env = {"LRDMEM_STORE": str(self.root), "LRDMEM_CONFIG": str(self.tmp / "cfg.json")}
+        sin = os.fdopen(r)
+        with mock.patch.dict(os.environ, env), mock.patch("sys.stdin", sin), \
+                mock.patch("pathlib.Path.cwd", return_value=self.repo), redirect_stdout(out), redirect_stderr(err):
+            t = threading.Thread(target=lambda: cli.main(["experience", "add", "--kind", "error", "--agent", "a", "hi"]))
+            t.daemon = True
+            t.start()
+            t.join(5)
+            alive = t.is_alive()
+        if not alive:  # closing under a blocked reader would hang the test run too
+            sin.close()
+        self.assertFalse(alive, "blocked reading stdin")
+        self.assertEqual(len(self.files()), 1)
+
+    def test_files_flag_repeats_and_does_not_swallow_text(self):
+        code, out, _ = self.run_cli(["--kind", "error", "--agent", "a", "--files", "a.py", "--files", "b.py,c.py", "t"])
+        self.assertEqual(code, 0)
+        self.assertEqual(parse(self.files()[0].read_text())["files"], ["a.py", "b.py", "c.py"])
+
+    def test_json_conflicting_with_flag_refused(self):
+        code, _, err = self.run_cli(["--kind", "error"], '{"text": "t", "kind": "decision", "agent": "a"}')
         self.assertEqual(code, 1)
-        self.assertIn("not both", err)
+        self.assertIn("kind", err)
         self.assertEqual(self.files(), [])
+
+    def test_clean_errors(self):
+        class Bad(io.StringIO):
+            def read(self, *a):
+                raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "bad")
+        with mock.patch("sys.stdin", Bad()), mock.patch.dict(os.environ, {"LRDMEM_STORE": str(self.root)}), \
+                mock.patch("pathlib.Path.cwd", return_value=self.repo), redirect_stderr(io.StringIO()):
+            self.assertEqual(cli.main(["experience", "add"]), 1)
+        with mock.patch("sys.stdin", None), mock.patch.dict(os.environ, {"LRDMEM_STORE": str(self.root)}), \
+                mock.patch("pathlib.Path.cwd", return_value=self.repo), redirect_stderr(io.StringIO()):
+            self.assertEqual(cli.main(["experience", "add"]), 1)
+        (self.root / "acme/web/experiences").write_text("x")
+        self.assertEqual(self.run_cli(["--kind", "error", "--agent", "a", "t"])[0], 1)
 
     def test_bad_input_refused(self):
         for stdin in ("not json", "[1]", '{"text": "t", "bogus": "x"}', '{"text": "t", "kind": 3, "agent": "a"}',

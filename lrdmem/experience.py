@@ -3,7 +3,9 @@
 There is deliberately no function to edit one; history is only ever added to.
 """
 
+import hashlib
 import re
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -46,30 +48,49 @@ def add(store: Store, cwd: Path, *, kind: str, agent: str, text: str, scope: str
                **{f"files[{i}]": f for i, f in enumerate(files)}}
     if any("\n" in v or "\r" in v for v in scalars.values()):
         raise Refused("agent, device, ref, request_id and files must be single-line")
+    if any(ord(c) < 32 or ord(c) == 127 for f in files for c in f):
+        raise Refused("files must not contain control characters")
     if any(f.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:", f) or ".." in re.split(r"[\\/]", f) for f in files):
         raise Refused("files must be relative paths without '..'")
     try:
         write.guard("\n".join([text, *scalars.values()]))
+        write.refuse_home_paths("\n".join([text, *scalars.values()]), scope)
         folder, _ = scope_folder(store, cwd, scope, env)
     except (write.Refused, LearnRefused) as e:
         raise Refused(str(e)) from None
-    if request_id:
+    exp = folder / "experiences"
+    rid = hashlib.sha1(request_id.encode()).hexdigest()[:12] if request_id else ""
+    if rid:
         for e in store.experiences():
-            if e.path.parent == folder / "experiences" and e.request_id == request_id:
+            if e.path.parent == exp and (e.request_id == request_id or e.path.stem.endswith(f"-req-{rid}")):
                 return e, False
     when = (when or datetime.now(timezone.utc)).astimezone(timezone.utc)
-    day, slug = when.strftime("%Y-%m-%d"), _slug(text)
+    day = when.strftime("%Y-%m-%d")
     data = {"date": when.strftime("%Y-%m-%dT%H:%M:%SZ"), "kind": kind, "agent": agent, "device": device,
             "repo": store.scope_of(folder)[1], "files": files, "source": source, "ref": ref,
             "request_id": request_id}
+    body = text.strip() + "\n"
+
+    def render(stem: str) -> str:
+        head = {"id": stem, **{k: v for k, v in data.items() if v not in (None, "", [])}}
+        return dump(head) + "\n\n" + body
     try:
         write.target(store, folder, "experiences/x.md")
-        (folder / "experiences").mkdir(exist_ok=True)
-        while True:
-            path = write.unique(folder / "experiences" / f"{day}-{slug}")
-            head = {"id": path.stem, **{k: v for k, v in data.items() if v not in (None, "", [])}}
-            if write.create(path, dump(head) + "\n\n" + text.strip() + "\n"):
-                break
-    except (write.Refused, StoreFormatError) as e:
+        exp.mkdir(exist_ok=True)
+        if rid:  # deterministic name: O_EXCL makes same-day races safe
+            # ponytail: a race straddling UTC midnight can write two; a lock file would close it
+            path = exp / f"{day}-req-{rid}.md"
+            created = write.create(path, render(path.stem))
+        else:
+            while True:
+                path = write.unique(exp / f"{day}-{_slug(text)}")
+                if created := write.create(path, render(path.stem)):
+                    break
+    except (write.Refused, StoreFormatError, OSError) as e:
         raise Refused(str(e)) from None
-    return store.node(path.relative_to(store.root).with_suffix("").as_posix()), True
+    ref = path.relative_to(store.root).with_suffix("").as_posix()
+    for _ in range(50):  # the winner of a race may still be writing the file the loser reads back
+        if (node := store.node(ref)) is not None:
+            return node, created
+        time.sleep(0.02)
+    raise Refused(f"{ref} exists but could not be read")

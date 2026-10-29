@@ -63,8 +63,10 @@ def _check_text(store: Store, fields: dict[str, str], scope: str, env: str | Non
             raise LearnRefused(f"{name} looks like it holds a credential")
     if scope == "global":
         return
-    if str(Path.home()) in "\n".join(fields.values()):
-        raise LearnRefused("text contains the home directory path, which must not enter a shared environment")
+    try:
+        write.refuse_home_paths("\n".join(fields.values()), scope)
+    except write.Refused as e:
+        raise LearnRefused(str(e)) from None
     known = {m.slug for m in store.memories() if m.env in (None, env)} | {slug}
     for link in _LINK.findall("\n".join(fields.values())):
         if link not in known:
