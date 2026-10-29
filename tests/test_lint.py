@@ -1,5 +1,6 @@
 import io
 import os
+import subprocess
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -169,6 +170,139 @@ class LintTest(unittest.TestCase):
                     self.assertEqual(main(["lint"]), code)
             self.assertEqual(e.getvalue().strip(), err)
             self.assertEqual(bool(out.getvalue()), code == 1)
+
+
+def _exp(**over):
+    f = {"id": "2026-10-29-x", "date": "2026-10-29T14:03:00Z", "kind": "error", "source": "run"}
+    f.update(over)
+    return "---\n" + "".join(f"{k}: {v}\n" for k, v in f.items()) + "---\nobserved\n"
+
+
+EXP = "work/app/experiences/2026-10-29-x.md"
+EDGE = "work/app/edges/e1.md"
+
+
+def _edge(**over):
+    f = {"id": "e1", "source": "work/app/a", "target": "work/app/experiences/2026-10-29-x", "type": "supports",
+         "state": "proposed"}
+    f.update(over)
+    return "---\n" + "".join(f"{k}: {v}\n" for k, v in f.items()) + "---\n"
+
+
+def v2files(**over):
+    files = clean()
+    files.update({EXP: _exp(), EDGE: _edge(), ".lrdmem-format": "2\n"})
+    files.update(over)
+    return files
+
+
+class LintV2Test(unittest.TestCase):
+    run_lint = LintTest.run_lint
+    has = LintTest.has
+
+    def test_clean_v2(self):
+        self.assertEqual(self.run_lint(v2files()), [])
+
+    def test_v2_memory_fields(self):
+        meta = "  memory_type: nope\n  state: bad\n  valid_from: x\n  valid_until: y\n  created: z\n"
+        out = self.run_lint(v2files(**{"work/app/a.md": mem(meta=meta, body="**Why:** w\n**How to apply:** h\n")}))
+        for msg in ("memory_type", "state", "valid_from", "valid_until", "created"):
+            self.assertTrue(any(f"metadata.{msg}" in p for p in out), (msg, out))
+
+    def test_memory_evidence(self):
+        ev = "evidence: [{ref: work/app/ghost, kind: supports, weight: 1}, {ref: x, kind: bad, weight: 1}, {ref: feedback:f1, kind: refutes, weight: 1}, {ref: work/app/experiences/2026-10-29-x, kind: supports, weight: 1}]\n"
+        out = self.run_lint(v2files(**{"work/app/a.md": mem(extra=ev)}))
+        self.assertEqual(len(out), 2, out)
+        self.assertTrue(any("evidence ref 'work/app/ghost' does not resolve" in p for p in out), out)
+        self.assertTrue(any("invalid evidence" in p for p in out), out)
+
+    def test_experience_problems(self):
+        self.has(v2files(**{EXP: _exp(kind="bogus")}), "kind must be one of")
+        self.has(v2files(**{EXP: _exp(source="bogus")}), "source must be one of")
+        self.has(v2files(**{EXP: _exp(date="nope")}), "date is not")
+        self.assertEqual(self.run_lint(v2files(**{EXP: _exp(date="2026-10-29")})), [])
+
+    def test_edge_problems(self):
+        self.has(v2files(**{EDGE: _edge(type="likes")}), "type must be one of")
+        self.has(v2files(**{EDGE: _edge(state="x")}), "state must be one of")
+        self.has(v2files(**{EDGE: _edge(target="work/app/ghost")}), "target 'work/app/ghost' does not exist")
+        self.has(v2files(**{EDGE: _edge(source="")}), "source")
+        self.has(v2files(**{EDGE: _edge(weight="heavy")}), "weight")
+        self.has(v2files(**{EDGE: _edge(evidence="[{ref: a, kind: zz, weight: 1}]")}), "invalid evidence")
+
+    def test_edge_endpoint_outside_scope(self):
+        files = v2files(**{"other/app/MEMORY.md": index("o"), "other/app/o.md": mem("o"), EDGE: _edge(target="other/app/o")})
+        self.has(files, "does not exist")
+
+    def test_revision_and_queue_shape(self):
+        rev = "work/app/revisions/2026-10-29-r1.md"
+        good = ("---\nid: 2026-10-29-r1\ntarget: work/app/a\naction: state_change\nbefore:\n  state: candidate\n"
+                "after:\n  state: active\nreason: r\nby: consolidate\ndate: 2026-10-29\n---\n")
+        self.assertEqual(self.run_lint(v2files(**{rev: good})), [])
+        self.has(v2files(**{rev: good.replace("state_change", "zap")}), "action must be one of")
+        self.has(v2files(**{rev: good.replace("work/app/a", "work/app/ghost")}), "target 'work/app/ghost' does not exist")
+        self.has(v2files(**{rev: good.replace("by: consolidate\n", "")}), "no by")
+        self.has(v2files(**{rev: good.replace("date: 2026-10-29", "date: no")}), "date is not")
+        q = "work/app/queue/q1.md"
+        qgood = "---\nid: q1\nkind: merge\nsubjects: [work/app/a]\nstatus: open\n---\n"
+        self.assertEqual(self.run_lint(v2files(**{q: qgood})), [])
+        self.has(v2files(**{q: qgood.replace("open", "weird")}), "status must be one of")
+        self.has(v2files(**{q: qgood.replace("[work/app/a]", "[]")}), "subjects is empty")
+        self.has(v2files(**{q: qgood.replace("kind: merge\n", "")}), "no kind")
+        self.has(v2files(**{q: qgood.replace("open", "resolved")}), "resolved without a resolution")
+
+    def test_secrets_in_all_entities(self):
+        key = "ghp_" + "a" * 36
+        for path, text in ((EXP, _exp().replace("observed", key)), (EDGE, _edge() + key + "\n"),
+                           ("work/app/revisions/r.md", f"---\nid: r\nafter:\n  x: {key}\n---\n"),
+                           ("work/app/queue/q.md", f"---\nid: q\n---\n{key}\n")):
+            self.has(v2files(**{path: text}), "looks like it holds a credential")
+
+    def test_marker_missing_warns_only_with_v2_data(self):
+        files = v2files()
+        del files[".lrdmem-format"]
+        self.has(files, ".lrdmem-format: missing")
+        files = clean()
+        self.assertEqual(self.run_lint(files), [])
+        files[".lrdmem-format"] = "3\n"
+        self.has(files, ".lrdmem-format")
+        files = clean(**{"work/app/queue/q.md": "---\nid: q\nkind: k\nsubjects: [work/app/a]\nstatus: open\n---\n"})
+        self.assertEqual(self.run_lint(files), [])
+
+
+class LintGitTest(unittest.TestCase):
+    ENV = {"GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1", "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+
+    def git(self, cwd, *args):
+        subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, env={**os.environ, **self.ENV})
+
+    def test_edited_experience(self):
+        with tempfile.TemporaryDirectory() as t:
+            files = v2files()
+            root = make_store(Path(t), files)
+            work = root / "work"
+            self.git(work, "init", "-q")
+            self.git(work, "add", "-A")
+            self.git(work, "commit", "-qm", "init")
+            with mock.patch.dict(os.environ, self.ENV):
+                self.assertEqual(lint(Store(root), git_checks=True), [])
+                (root / EXP).write_text(_exp().replace("observed", "rewritten"))
+                self.assertEqual(lint(Store(root)), [])  # off by default
+                out = lint(Store(root), git_checks=True)
+                self.assertEqual(len(out), 1, out)
+                self.assertIn(f"{EXP}: experience changed since its first commit", out[0])
+                self.git(work, "add", "-A")
+                self.git(work, "commit", "-qm", "edit")
+                self.assertEqual(len(lint(Store(root), git_checks=True)), 1)
+
+    def test_untracked_or_outside_git_is_skipped(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = make_store(Path(t), v2files())
+            with mock.patch.dict(os.environ, self.ENV):
+                self.assertEqual(lint(Store(root), git_checks=True), [])
+                self.git(root / "work", "init", "-q")
+                self.assertEqual(lint(Store(root), git_checks=True), [])
 
 
 if __name__ == "__main__":

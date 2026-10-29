@@ -4,7 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from lrdmem.store import AmbiguousRepo, Store, repo_key, resolve, store_root
+from lrdmem.store import (SUPPORTED_FORMAT, AmbiguousRepo, Context, Edge, Experience, Memory, QueueItem, Revision,
+                          Store, StoreFormatError, repo_key, resolve, store_root)
 from tests.fixtures import make_store
 
 
@@ -132,6 +133,131 @@ class StoreTest(unittest.TestCase):
             resolve(s, repo)
         self.assertEqual(resolve(s, repo, "home"), ("home", "app"))
         self.assertIsNone(resolve(s, repo, "nope"))
+
+
+def _v2(extra_meta="", top="", body="b\n"):
+    return f"---\nname: n\ndescription: d\nmetadata:\n  type: feedback\n{extra_meta}{top}---\n{body}"
+
+
+class V2StoreTest(unittest.TestCase):
+    def setUp(self):
+        self._t = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._t.name)
+        self.addCleanup(self._t.cleanup)
+
+    def store(self, files):
+        return Store(make_store(self.tmp, files))
+
+    def test_memory_defaults_and_mapping(self):
+        s = self.store({"work/app/a.md": _mem(), "work/app/o.md": _mem(extra="  kind: obligation\n"),
+                        "work/app/p.md": _mem(extra="  kind: pattern\n"),
+                        "work/app/v.md": _mem(extra="  kind: fact\n  memory_type: bogus\n  state: nope\n")})
+        m = {x.slug: x for x in s.memories()}
+        self.assertEqual((m["a"].memory_type, m["a"].state), ("semantic", "active"))
+        self.assertEqual(m["o"].memory_type, "procedural")
+        self.assertEqual(m["p"].memory_type, "procedural")
+        self.assertEqual((m["v"].memory_type, m["v"].state), ("semantic", "active"))
+        self.assertEqual(m["a"].ref, "work/app/a")
+
+    def test_memory_v2_fields_and_evidence(self):
+        meta = ("  memory_type: hypothesis\n  state: candidate\n  valid_from: 2026-01-01\n"
+                "  valid_until: 2027-01-01\n  created: 2026-01-01\n")
+        top = "evidence: [{ref: work/app/experiences/e1, kind: supports, weight: 0.5}, {ref: x, kind: bad, weight: 1}]\n"
+        m = self.store({"work/app/a.md": _v2(meta, top)}).memories()[0]
+        self.assertEqual((m.memory_type, m.state, m.valid_from, m.valid_until, m.created),
+                         ("hypothesis", "candidate", "2026-01-01", "2027-01-01", "2026-01-01"))
+        self.assertEqual([(e.ref, e.kind, e.weight) for e in m.evidence], [("work/app/experiences/e1", "supports", 0.5)])
+
+    def test_new_folders_are_not_memories(self):
+        files = {"work/app/a.md": _mem()}
+        for sub in ("experiences", "edges", "revisions", "queue"):
+            files[f"work/app/{sub}/x.md"] = "---\nid: x\n---\n"
+        files["work/app/experiences/2026-10-29-x.md"] = "---\nid: 2026-10-29-x\n---\n"
+        s = self.store(files)
+        self.assertEqual([m.slug for m in s.memories()], ["a"])
+        self.assertEqual(s.environments(), ["work"])
+        self.assertEqual([p.name for p in s.folders()], ["app"])
+
+    def test_entities(self):
+        s = self.store({
+            "work/app/experiences/2026-10-29-x.md": ("---\nid: 2026-10-29-x\nkind: error\ndate: 2026-10-29T14:03:00Z\n"
+                "agent: codex\ndevice: nb\nfiles: [a.php, b.php]\nsource: run\nrequest_id: r1\n---\nbody\n"),
+            "work/app/edges/2026-10-29-e1.md": ("---\nid: 2026-10-29-e1\nsource: work/app/a\ntarget: work/app/b\ntype: supports\n"
+                "state: proposed\nweight: 0.5\nevidence: [{ref: work/app/a, kind: supports, weight: 1.0}]\nsuperseded_by: e2\n---\n"),
+            "work/app/edges/2026-10-29-e2.md": "---\nid: 2026-10-29-e2\nweight: nan\n---\n",
+            "work/app/revisions/2026-10-29-r1.md": ("---\nid: 2026-10-29-r1\ntarget: work/app/a\naction: state_change\n"
+                "before:\n  state: candidate\nafter:\n  state: active\nreason: two\nby: consolidate\ndate: 2026-10-29\n---\n"),
+            "work/app/queue/q1.md": "---\nid: q1\nkind: merge\nsubjects: [work/app/a, work/app/b]\nstatus: resolved\nresolution: keep\n---\n",
+            "work/app/queue/q2.md": "---\nid: q2\n---\n",
+        })
+        e = s.experiences()[0]
+        self.assertIsInstance(e, Experience)
+        self.assertEqual((e.id, e.kind, e.date, e.agent, e.device, e.files, e.source, e.request_id),
+                         ("2026-10-29-x", "error", "2026-10-29T14:03:00Z", "codex", "nb", ["a.php", "b.php"], "run", "r1"))
+        self.assertEqual(e.ref, "work/app/experiences/2026-10-29-x")
+        e1, e2 = s.edges()
+        self.assertIsInstance(e1, Edge)
+        self.assertEqual((e1.source, e1.target, e1.type, e1.state, e1.weight, e1.superseded_by),
+                         ("work/app/a", "work/app/b", "supports", "proposed", 0.5, "e2"))
+        self.assertEqual(len(e1.evidence), 1)
+        self.assertEqual((e2.weight, e2.evidence), (1.0, []))
+        r = s.revisions()[0]
+        self.assertIsInstance(r, Revision)
+        self.assertEqual((r.target, r.action, r.before, r.after, r.reason, r.by, r.date),
+                         ("work/app/a", "state_change", {"state": "candidate"}, {"state": "active"}, "two", "consolidate", "2026-10-29"))
+        q1, q2 = s.queue()
+        self.assertIsInstance(q1, QueueItem)
+        self.assertEqual((q1.kind, q1.subjects, q1.status, q1.resolution),
+                         ("merge", ["work/app/a", "work/app/b"], "resolved", "keep"))
+        self.assertEqual((q2.status, q2.subjects, q2.resolution), ("open", [], ""))
+
+    def test_context_is_correction_experience(self):
+        s = self.store({"work/app/contexts/c1.md": "---\nid: c1\ndate: 2026-01-02\nsource: chat\nmemories: [a]\n---\nb\n"})
+        self.assertIs(Context, Experience)
+        (c,) = s.experiences()
+        self.assertEqual((c.kind, c.memories, c.ref), ("correction", ["a"], "work/app/contexts/c1"))
+        self.assertEqual(s.contexts(), [c])
+
+    def test_wikilink_is_not_an_edge(self):
+        s = self.store({"work/app/a.md": _mem(body="see [[x]]\n")})
+        self.assertEqual(s.edges(), [])
+        self.assertEqual(s.memories()[0].links, ["x"])
+
+    def test_node(self):
+        s = self.store({"_global/g.md": _mem(), "work/_global/w.md": _mem(), "work/app/a.md": _mem(),
+                        "work/app/experiences/x.md": "---\nid: x\n---\n", "work/app/edges/e.md": "---\nid: e\n---\n",
+                        "work/app/contexts/c.md": "---\nid: c\n---\n", "_global/experiences/gx.md": "---\nid: gx\n---\n",
+                        "work/app/MEMORY.md": "x"})
+        for ref, cls in (("_global/g", Memory), ("work/_global/w", Memory), ("work/app/a", Memory),
+                         ("work/app/experiences/x", Experience), ("work/app/edges/e", Edge),
+                         ("work/app/contexts/c", Experience), ("_global/experiences/gx", Experience)):
+            self.assertIsInstance(s.node(ref), cls, ref)
+        for ref in ("work/app/nope", "work/app/MEMORY", "../a", "work/../work/app/a", "", "a", "work/app/a.md",
+                    "work/app/queue/x/y", "bin/app/a", "work/app/experiences"):
+            self.assertIsNone(s.node(ref), ref)
+
+    def test_format_marker(self):
+        s = self.store({"work/app/a.md": _mem()})
+        self.assertEqual(s.format(), 1)
+        s.ensure_format()
+        self.assertEqual((s.root / ".lrdmem-format").read_text().strip(), "2")
+        self.assertEqual(s.format(), SUPPORTED_FORMAT)
+        s.ensure_format()
+        (s.root / ".lrdmem-format").write_text("3\n")
+        with self.assertRaises(StoreFormatError):
+            s.ensure_format()
+        self.assertEqual(s.format(), 3)
+        (s.root / ".lrdmem-format").write_text("junk")
+        with self.assertRaises(StoreFormatError):
+            s.format()
+
+    def test_format_marker_does_not_follow_symlink(self):
+        s = self.store({"work/app/a.md": _mem()})
+        target = self.tmp / "victim"
+        (s.root / ".lrdmem-format").symlink_to(target)
+        with self.assertRaises(StoreFormatError):
+            s.ensure_format()
+        self.assertFalse(target.exists())
 
 
 if __name__ == "__main__":

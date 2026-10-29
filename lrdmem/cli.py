@@ -408,7 +408,7 @@ def _main(argv: list[str] | None) -> int:
         store = Store(store_root())
         return args.fn(store, Graph(store), args)
     if args.command == "lint":
-        problems = lint(Store(store_root()), args.env)
+        problems = lint(Store(store_root()), args.env, git_checks=True)
         for line in problems:
             print(printable(line))
         print(f"{len(problems)} problem(s)" if problems else "ok", file=sys.stderr)

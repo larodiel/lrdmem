@@ -60,3 +60,9 @@ class CompatTest(_Base):
         out = self.hook("pre-tool", self.payload("pre_tool_edit"))
         self.assertIn("tabs", out)
         self.assertNotIn("Write the plan first", out)
+
+    def test_v01_memories_read_as_semantic_active(self):
+        mems = Store(self.root).memories()
+        self.assertTrue(mems)
+        self.assertEqual({(m.memory_type, m.state) for m in mems}, {("semantic", "active")})
+        self.assertEqual(Store(self.root).format(), 1)
