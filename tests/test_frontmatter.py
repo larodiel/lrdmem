@@ -1,6 +1,6 @@
 import unittest
 
-from lrdmem.frontmatter import dump, parse, split
+from lrdmem.frontmatter import dump, parse, split, unsupported
 
 
 class FrontmatterTest(unittest.TestCase):
@@ -28,6 +28,22 @@ class FrontmatterTest(unittest.TestCase):
 
     def test_roundtrip_quotes_and_empty(self):
         d = {"files": ["it's.py", 'say "hi".py', "", "plain"], "note": "", "q": '"x"', "ml": "a\nb", "l": "[x]"}
+        self.assertEqual(parse(dump(d) + "\n"), d)
+
+    def test_inline_map_list_roundtrip(self):
+        d = {"evidence": [{"ref": "a/b", "kind": "supports", "weight": "1.0"},
+                          {"ref": "x: y, z", "kind": "a b", "weight": "0.5"}], "plain": ["{x}", "k"]}
+        text = dump(d) + "\n"
+        self.assertEqual(parse(text), d)
+        self.assertEqual(dump(parse(text)), dump(d))
+        self.assertIn("evidence: [{ref: a/b, kind: supports, weight: 1.0}, ", text)
+        self.assertEqual(unsupported(text), [])
+        self.assertEqual(parse("---\ne: [{ref: a/b, kind: supports}, {ref: c}]\n---\n")["e"],
+                         [{"ref": "a/b", "kind": "supports"}, {"ref": "c"}])
+
+    def test_inline_map_nested_kept_as_raw_string(self):
+        d = parse("---\ne: [{a: {b: c}, d: [x, y]}]\n---\n")
+        self.assertEqual(d["e"], [{"a": "{b: c}", "d": "[x, y]"}])
         self.assertEqual(parse(dump(d) + "\n"), d)
 
     def test_split_returns_body_and_quotes_stripped(self):

@@ -1,12 +1,13 @@
 """Parser and writer for the small YAML subset used in memory frontmatter.
 
 Grammar: top-level `key: value`; a `key:` with an empty value opens a section
-of indented `key: value` lines; values may be quoted or inline lists.
+of indented `key: value` lines; values may be quoted or inline lists; list items may be flat inline maps `{k: v}`
+(nested maps/lists inside a map stay raw strings, quoted on dump).
 """
 
 import json
 
-_SPECIAL = (",", "]", ":", " ", "'", '"')
+_SPECIAL = (",", "]", ":", " ", "'", '"', "{")
 
 
 def _unquote(value: str) -> str:
@@ -20,23 +21,39 @@ def _unquote(value: str) -> str:
     return value
 
 
-def _split_list(inner: str) -> list[str]:
-    items, cur, quote = [], "", ""
+def _split_top(inner: str, sep: str) -> list[str]:
+    """Split on sep outside quotes and outside nested {} / []."""
+    items, cur, quote, depth = [], "", "", 0
     for ch in inner:
         if quote:
-            cur += ch
             if ch == quote:
                 quote = ""
         elif ch in "\"'":
             quote = ch
-            cur += ch
-        elif ch == ",":
+        elif ch in "{[":
+            depth += 1
+        elif ch in "}]":
+            depth -= 1
+        elif ch == sep and depth <= 0:
             items.append(cur)
             cur = ""
-        else:
-            cur += ch
+            continue
+        cur += ch
     items.append(cur)
-    return [_unquote(i.strip()) for i in items if i.strip()]
+    return items
+
+
+def _item(raw: str):
+    """A list item: an inline map `{k: v, ...}` (flat; nested values stay raw strings) or a scalar."""
+    if raw.startswith("{") and raw.endswith("}"):
+        pairs = [p.partition(":") for p in _split_top(raw[1:-1], ",") if p.strip()]
+        if all(sep for _, sep, _ in pairs):
+            return {k.strip(): _unquote(v.strip()) for k, _, v in pairs}
+    return _unquote(raw)
+
+
+def _split_list(inner: str) -> list:
+    return [_item(i.strip()) for i in _split_top(inner, ",") if i.strip()]
 
 
 def _value(raw: str):
@@ -100,9 +117,14 @@ def parse(text: str) -> dict | None:
     return split(text)[0]
 
 
+def _scalar(i: str) -> str:
+    return json.dumps(i) if not i or any(c in i for c in _SPECIAL) else i
+
+
 def _fmt(value) -> str:
     if isinstance(value, list):
-        items = [json.dumps(i) if not i or any(c in i for c in _SPECIAL) else i for i in value]
+        items = ["{" + ", ".join(f"{k}: {_scalar(str(v))}" for k, v in i.items()) + "}" if isinstance(i, dict)
+                 else _scalar(i) for i in value]
         return "[" + ", ".join(items) + "]"
     text = str(value)
     if isinstance(value, str) and (not text or "\n" in text or text[0] in "\"'[" or text != text.strip()):
