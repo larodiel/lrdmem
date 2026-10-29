@@ -1,0 +1,19 @@
+class Lrdmem < Formula
+  include Language::Python::Virtualenv
+
+  desc "Shared git-backed memory store for AI coding agents"
+  homepage "https://github.com/larodiel/lrdmem"
+  url "@URL@"
+  sha256 "@SHA256@"
+  license "MIT"
+
+  depends_on "python@3.13"
+
+  def install
+    virtualenv_install_with_resources
+  end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/lrdmem --version")
+  end
+end

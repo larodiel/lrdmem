@@ -51,3 +51,14 @@ All three run the same handlers through `lrdmem hook <phase> --agent claude|code
 `~/.claude/skills/lrdmem/`, Codex `~/.agents/skills/lrdmem/`, OpenCode `~/.config/opencode/skills/lrdmem/`).
 OpenCode also reads the Claude and `~/.agents` skill folders, so after installing for several agents it may list
 the lrdmem skill twice; that is harmless.
+
+## Releasing
+
+Pushing a tag `vX.Y.Z` (must equal `lrdmem.__version__`) builds and smoke-tests the sdist and wheel, publishes to PyPI,
+attaches `lrdmem_X.Y.Z_all.deb` to the GitHub Release and updates the Homebrew tap. One-time setup:
+
+1. Create the GitHub repo `larodiel/homebrew-tap` (with a `main` branch).
+2. On PyPI, add a trusted publisher for project `lrdmem`: owner `larodiel`, repo `lrdmem`, workflow `release.yml`,
+   environment `pypi`. Create the `pypi` environment in the repo settings.
+3. Create a token with write access to `larodiel/homebrew-tap` and add it to this repo as the secret `HOMEBREW_TAP_TOKEN`.
+4. Release: `git tag vX.Y.Z && git push --tags`.
