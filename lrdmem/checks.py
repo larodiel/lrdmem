@@ -105,6 +105,7 @@ def _kill(proc: subprocess.Popen) -> None:
         proc.communicate(timeout=KILL_WAIT)
     except subprocess.TimeoutExpired:  # a grandchild in its own session still holds the pipe
         proc.stdout.close()
+        proc.wait()  # the shell itself got SIGKILL: reap it
 
 
 def run_checks(store: Store, env: str, repo: str, repo_root: Path, on: str, files: list[str], cfg: dict) -> CheckResult:

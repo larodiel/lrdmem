@@ -88,22 +88,22 @@ class TriggersTest(unittest.TestCase):
         files = {f"work/app/{n}.md": _mem(n, PHP) for n in ("b", "a", "c")}
         files["work/app/o.md"] = _mem("o", PHP, kind="fact")
         files.update(dict([ctx(1, "c"), ctx(2, "c"), ctx(3, "b")]))
-        got = select(Store(make_store(self.tmp, files)), "work", "app", path="a.php")
+        got = select(Store(make_store(self.tmp, files)), "work", "app", paths=["a.php"])
         self.assertEqual([m.slug for m in got], ["c", "b", "a", "o"])
 
     def test_first_match_over_budget_gives_nothing(self):
         store = Store(make_store(self.tmp, {"work/app/m.md": _mem("m", PHP, body="x" * 2000)}))
-        self.assertEqual(select(store, "work", "app", path="a.php", budget=100), [])
+        self.assertEqual(select(store, "work", "app", paths=["a.php"], budget=100), [])
 
     def test_select_order_budget_exclude(self):
         files = {f"work/app/m{i}.md": _mem(f"m{i}", PHP, body="x" * 2000) for i in range(10)}
         files["work/app/ob.md"] = _mem("ob", PHP, kind="obligation", body="y")
         store = Store(make_store(self.tmp, files))
-        got = select(store, "work", "app", path="a.php", budget=1500)
+        got = select(store, "work", "app", paths=["a.php"], budget=1500)
         self.assertEqual(got[0].slug, "ob")
         self.assertLess(len(got), 11)
         self.assertLessEqual(len(render(got, "a.php")) // 4, 1500)
-        self.assertEqual([m.slug for m in select(store, "work", "app", path="a.php", exclude={"ob"}, budget=9999)][:1], ["m0"])
+        self.assertEqual([m.slug for m in select(store, "work", "app", paths=["a.php"], exclude={"ob"}, budget=9999)][:1], ["m0"])
         self.assertTrue(render(got[:1], "a.php").startswith("## lrdmem: rules for a.php\n\n### ob\ny"))
 
     def test_cli_for_not_opted_in(self):

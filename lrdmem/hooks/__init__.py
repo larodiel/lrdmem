@@ -1,7 +1,7 @@
 """Harness-neutral hook handlers and the dispatcher every `lrdmem hook` call goes through."""
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from lrdmem import config
@@ -19,12 +19,12 @@ LINT_SHOWN = 10
 
 @dataclass
 class HookInput:
-    """One harness event, already mapped to a handler event; path is relative to the repo root."""
+    """One harness event, already mapped to a handler event; paths are relative to the repo root."""
 
     event: str
     session_id: str
     cwd: Path
-    path: str | None = None
+    paths: list[str] = field(default_factory=list)
     command: str | None = None
     prompt: str | None = None
     stop_active: bool = False
@@ -58,18 +58,23 @@ def repo_path(cwd: Path, path: str | None) -> str | None:
         return None
 
 
-def patch_path(patch: str) -> str | None:
-    """First file an apply_patch-format patch adds or updates (its `Move to` target when renamed); None if none."""
-    path = None
+def repo_paths(cwd: Path, paths: list[str | None]) -> list[str]:
+    """repo_path of each path, dropping empty and outside-repo ones and duplicates, in order."""
+    return list(dict.fromkeys(p for p in (repo_path(cwd, path) for path in paths) if p))
+
+
+def patch_paths(patch: str) -> list[str]:
+    """Files an apply_patch-format patch adds or updates (an update's `Move to` target when renamed); not deletes."""
+    paths: list[str] = []
+    renamable = False
     for line in patch.splitlines():
         head, _, rest = line.partition(": ")
-        if head in ("*** Add File", "*** Update File", "*** Delete File"):
-            if path:
-                break
-            path = rest.strip() if head != "*** Delete File" else None
-        elif head == "*** Move to" and path:
-            path = rest.strip()
-    return path or None
+        if head in ("*** Add File", "*** Update File"):
+            paths.append(rest.strip())
+        elif head == "*** Move to" and renamable:
+            paths[-1] = rest.strip()
+        renamable = head == "*** Update File" or (renamable and not head.startswith("*** "))
+    return list(dict.fromkeys(p for p in paths if p))
 
 
 def _scope(inp: HookInput) -> _Scope | None:
@@ -113,27 +118,28 @@ def _session_start(inp: HookInput, s: _Scope) -> HookOutput:
 
 
 def _inject(inp: HookInput, s: _Scope) -> HookOutput:
-    if not (inp.path or inp.command):
+    if not (inp.paths or inp.command):
         return HookOutput()
     session = Session(inp.session_id)
-    picked = select(s.store, s.env, s.repo, path=inp.path, command=inp.command, exclude=session.injected)
+    picked = select(s.store, s.env, s.repo, paths=inp.paths, command=inp.command, exclude=session.injected)
     if not picked:
         return HookOutput()
     session.injected |= {m.slug for m in picked}
     session.save()
-    return HookOutput(render(picked, inp.path or inp.command or ""))
+    return HookOutput(render(picked, ", ".join(inp.paths) or inp.command or ""))
 
 
 def _post_edit(inp: HookInput, s: _Scope) -> HookOutput:
     root = toplevel(inp.cwd)
-    if not inp.path or not root:
+    if not inp.paths or not root:
         return HookOutput()
     session = Session(inp.session_id)
-    if inp.path not in session.edited:
-        session.edited.append(inp.path)
+    new = [p for p in inp.paths if p not in session.edited]
+    if new:
+        session.edited += new
         session.save()
     ons = ("post-edit", "stop") if inp.edit_time_stop else ("post-edit",)
-    results = (run_checks(s.store, s.env, s.repo, root, on, [inp.path], s.cfg) for on in ons)
+    results = (run_checks(s.store, s.env, s.repo, root, on, inp.paths, s.cfg) for on in ons)
     return HookOutput("\n".join(filter(None, map(_failures, results))))
 
 

@@ -6,7 +6,7 @@ import re
 from datetime import date
 from pathlib import Path
 
-from lrdmem.hooks import HookInput, HookOutput, repo_path
+from lrdmem.hooks import HookInput, HookOutput, repo_paths
 
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 _EVENT_NAMES = {"session-start": "SessionStart", "pre-edit": "PreToolUse", "pre-command": "PreToolUse",
@@ -30,7 +30,7 @@ def parse(event: str, payload: dict) -> HookInput:
         inp.event, inp.stop_active = "stop", payload.get("stop_hook_active") is True
     elif event in ("pre-tool", "post-tool") and tool in EDIT_TOOLS:
         inp.event = "pre-edit" if event == "pre-tool" else "post-edit"
-        inp.path = repo_path(cwd, _str(ti.get("file_path")) or _str(ti.get("notebook_path")))
+        inp.paths = repo_paths(cwd, [_str(ti.get("file_path")) or _str(ti.get("notebook_path"))])
     elif event == "pre-tool" and tool == "Bash":
         inp.event, inp.command = "pre-command", _str(ti.get("command"))
     return inp

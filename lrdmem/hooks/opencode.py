@@ -12,7 +12,7 @@ OpenCode has no blocking Stop, so stop checks run at post-edit and stop only syn
 import os
 from pathlib import Path
 
-from lrdmem.hooks import HookInput, HookOutput, patch_path, repo_path
+from lrdmem.hooks import HookInput, HookOutput, patch_paths, repo_paths
 from lrdmem.hooks.claude import _str
 
 EDIT_TOOLS = {"edit", "write", "patch"}
@@ -28,8 +28,8 @@ def parse(event: str, payload: dict) -> HookInput:
         inp.event = event
     elif event in ("pre-tool", "post-tool") and tool in EDIT_TOOLS:
         inp.event = "pre-edit" if event == "pre-tool" else "post-edit"
-        raw = patch_path(_str(args.get("patchText")) or "") if tool == "patch" else _str(args.get("path"))
-        inp.path = repo_path(cwd, raw)
+        raw = patch_paths(_str(args.get("patchText")) or "") if tool == "patch" else [_str(args.get("path"))]
+        inp.paths = repo_paths(cwd, raw)
     elif event == "pre-tool" and tool == "shell":
         inp.event, inp.command = "pre-command", _str(args.get("command"))
     return inp

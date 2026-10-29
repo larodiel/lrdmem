@@ -1,5 +1,6 @@
 """Trigger matching: which memories apply to the file or command an agent is touching."""
 
+from collections.abc import Sequence
 from fnmatch import fnmatchcase
 
 from lrdmem.graph import Graph
@@ -42,17 +43,18 @@ def render(memories: list[Memory], target: str = "") -> str:
     return "\n\n".join(parts) + "\n"
 
 
-def select(store: Store, env: str, repo: str, path: str | None = None, command: str | None = None,
+def select(store: Store, env: str, repo: str, paths: Sequence[str] = (), command: str | None = None,
            exclude: set[str] | frozenset[str] = frozenset(), budget: int = 1500) -> list[Memory]:
-    """Matching memories, obligations first then strongest, cut at the first that exceeds the budget."""
+    """Memories matching any of paths or command, obligations first then strongest, cut at the budget."""
     graph = Graph(store)
     found = [m for m in store.memories()
-             if m.slug not in exclude and matches(m, env, repo, path, command)]
+             if m.slug not in exclude and (any(matches(m, env, repo, path=p) for p in paths)
+                                           or matches(m, env, repo, command=command))]
     found.sort(key=lambda m: (_KINDS.index(m.kind) if m.kind in _KINDS else len(_KINDS),
                               -graph.strength(m), m.slug))
     chosen: list[Memory] = []
     for m in found:
-        if len(render(chosen + [m], path or command or "")) // 4 > budget:
+        if len(render(chosen + [m], ", ".join(paths) or command or "")) // 4 > budget:
             break
         chosen.append(m)
     return chosen

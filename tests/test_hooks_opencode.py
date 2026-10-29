@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 
 from lrdmem import config
+from lrdmem.session import Session
 from tests import test_hooks as th
 
 FIXTURES = Path(__file__).parent / "fixtures" / "opencode"
@@ -24,7 +25,7 @@ class OpenCodeHookTest(th._Base):
 
     def test_session_start_is_plain_text(self):
         self.store()
-        text = (th.ClaudeHookTest.header(self) + "\n\n## _global/MEMORY.md\n(empty)\n\n## work/_global/MEMORY.md\n"
+        text = (self.header() + "\n\n## _global/MEMORY.md\n(empty)\n\n## work/_global/MEMORY.md\n"
                 "(empty)\n\n## work/app/MEMORY.md\n- [PHP style](php-style.md) — tabs\n")
         self.assertEqual(self.hook("session-start", self.payload("session_start")), text)
         self.assertEqual(self.hook(None, self.payload("session_start"), argv=["context", "--agent", "opencode"]), text)
@@ -37,10 +38,18 @@ class OpenCodeHookTest(th._Base):
         self.assertEqual(self.hook("pre-tool", self.payload("pre_tool_edit")), "")
         self.assertEqual(self.hook("pre-tool", self.payload("pre_tool_edit", session_id="ses_2")), text)
 
-    def test_patch_uses_first_added_or_updated_file(self):
+    def test_patch_skips_deletes_and_follows_moves(self):
         self.store()
         self.assertTrue(self.hook("pre-tool", self.payload("pre_tool_patch")).startswith(
-            "## lrdmem: rules for src/a.php\n"))
+            "## lrdmem: rules for src/a.php, c.php\n"))
+
+    def test_multi_file_patch_covers_every_file(self):
+        self.multi_store()
+        p = self.payload("pre_tool_patch", input={"patchText": th.MULTI_PATCH})
+        self.assertEqual(self.hook("pre-tool", p), self.multi_rules() + "\n")
+        self.assertEqual(self.hook("post-tool", p), "lrdmem check failed: lint-all\ngot src/a.php src/b.php lib/c.js\n"
+                         "lrdmem check failed: stop-all\nlate src/a.php src/b.php lib/c.js\n")
+        self.assertEqual(Session("ses_1").edited, th.MULTI)
 
     def test_pre_command(self):
         self.store()
@@ -56,13 +65,9 @@ class OpenCodeHookTest(th._Base):
 
     def test_post_edit_runs_post_edit_and_stop_checks(self):
         store = self.store({"work/app/lint-php.md": th._ob("echo bad {files} && exit 1", "post-edit"),
-                            "work/app/stop-php.md": th._ob("echo late {files} && exit 1", "stop").replace(
-                                "name: lint-php", "name: stop-php")})
+                            "work/app/stop-php.md": th._ob("echo late {files} && exit 1", "stop", "stop-php")})
         self.approve(store)
-        cfg = config.load()
-        m = next(m for m in store.memories() if m.slug == "stop-php")
-        cfg["allow"][th.checks.key(store, m)] = th.checks.command_hash(m)
-        config.save(cfg)
+        self.approve(store, "stop-php")
         self.assertEqual(self.hook("post-tool", self.payload("post_tool_write")),
                          FAIL + "lrdmem check failed: stop-php\nlate src/a.php\n")
 
@@ -104,32 +109,51 @@ class PluginFileTest(th.unittest.TestCase):
 
 
 DRIVER = r"""
+import { existsSync, readFileSync } from "node:fs";
 const mod = await import(process.argv[1]);
 const hooks = {};
 const reg = (domain) => ({ hook: async (name, cb) => { hooks[domain + "." + name] = cb; return { dispose: async () => {} }; } });
+const queue = [];
+let wake = () => {};
+const emit = (e) => { queue.push(e); wake(); };
 const ctx = { location: { directory: "/w" }, session: reg("session"), tool: reg("tool"),
   event: { subscribe: () => (async function* () {
-    yield { type: "session.updated", data: { sessionID: "s" } };
-    yield { type: "session.execution.succeeded", data: { sessionID: "s" } }; })() } };
+    for (;;) { while (queue.length) yield queue.shift(); await new Promise((r) => { wake = r; }); } })() } };
+const stops = () => existsSync(process.env.LOG) ? readFileSync(process.env.LOG, "utf8").split("\n").filter((l) => l === "stop").length : 0;
+const waitStops = async (n) => {
+  const live = existsSync(process.env.LRDMEM_BIN);  // a missing binary never logs: do not wait for it
+  for (const end = Date.now() + 10000; live && stops() < n && Date.now() < end;) await new Promise((r) => setTimeout(r, 20));
+  return stops();
+};
 const out = { cleanup: typeof await mod.default.setup(ctx), id: mod.default.id };
 const sys = async () => { const ev = { sessionID: "s", system: [] }; await hooks["session.context"](ev); return ev.system; };
 out.first = await sys();
 await hooks["session.prompt"]({ sessionID: "s" });
 out.afterPrompt = await sys();
 out.later = await sys();
-const call = async (id, result, status = "completed") => {
-  await hooks["tool.execute.before"]({ tool: "edit", sessionID: "s", id, input: { path: "a" } });
+const before = (id) => hooks["tool.execute.before"]({ tool: "edit", sessionID: "s", id, input: { path: "a" } });
+const after = async (id, result, status = "completed") => {
   const ev = { tool: "edit", sessionID: "s", id, input: { path: "a" }, status, ...(result ? { result } : {}) };
   await hooks["tool.execute.after"](ev);
   return ev.result;
 };
+const call = async (id, result, status) => { await before(id); return after(id, result, status); };
 out.str = await call("c1", { content: "ok" });
 out.arr = await call("c2", { content: [{ type: "text", text: "ok" }] });
 out.err = await call("c3", undefined, "error");
 out.afterErr = await sys();
-await new Promise((r) => setTimeout(r, 300));
+const end = (location) => ({ type: "session.execution.succeeded", data: { sessionID: "s" }, ...(location ? { location } : {}) });
+emit(end({ directory: "/elsewhere" }));
+emit({ type: "session.updated", data: { sessionID: "s" } });
+await before("c9");
+emit(end({ directory: "/w" }));
+out.stops = await waitStops(1);
+out.stale = await after("c9", { content: "ok" });
+emit(end());
+out.stops2 = await waitStops(2);
 out.broken = typeof await mod.default.setup({});
 console.log(JSON.stringify(out));
+process.exit(0);
 """
 
 
@@ -148,7 +172,7 @@ class PluginNodeTest(th._Base):
 
     def run_driver(self, **env):
         r = subprocess.run([self.node, "--input-type=module", "-e", DRIVER, str(PLUGIN)], capture_output=True,
-                           text=True, timeout=60, env={**os.environ, "LRDMEM_BIN": str(self.bin), **env})
+                           text=True, timeout=60, env={**os.environ, "LRDMEM_BIN": str(self.bin), "LOG": str(self.log), **env})
         self.assertEqual(r.stderr, "")
         return json.loads(r.stdout)
 
@@ -168,9 +192,9 @@ class PluginNodeTest(th._Base):
         self.assertIsNone(out.get("err"))
         self.assertEqual(out["afterErr"], [start, {"type": "text", "text": both()}])
         self.assertEqual(out["broken"], "function")
-        phases = self.log.read_text().split()
-        self.assertEqual(phases.count("session-start"), 1)
-        self.assertEqual(phases.count("stop"), 1)
+        self.assertEqual((out["stops"], out["stops2"]), (1, 2))  # the other-directory end event is skipped
+        self.assertEqual(out["stale"], {"content": f"ok\n\npost-tool:{tool}"})  # pre-tool text dropped at the end
+        self.assertEqual(self.log.read_text().split().count("session-start"), 1)
 
     def test_missing_binary_injects_nothing(self):
         out = self.run_driver(LRDMEM_BIN=str(self.tmp / "nope"))

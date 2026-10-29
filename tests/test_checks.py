@@ -1,3 +1,4 @@
+import gc as _gc
 import io
 import json
 import os
@@ -6,6 +7,7 @@ import subprocess
 import tempfile
 import time
 import unittest
+import warnings
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
@@ -101,8 +103,12 @@ class ChecksTest(_Base):
         self._store(gc)
         self.addCleanup(self._reap)
         start = time.time()
-        with mock.patch.object(checks, "TIMEOUT", 1), mock.patch.object(checks, "KILL_WAIT", 1):
+        with mock.patch.object(checks, "TIMEOUT", 1), mock.patch.object(checks, "KILL_WAIT", 1), \
+                warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
             r = self._run(["a.php"], cfg=self._approve())
+            _gc.collect()
+        self.assertEqual([w for w in caught if issubclass(w.category, ResourceWarning)], [])  # the shell was reaped
         self.assertLess(time.time() - start, 10)
         self.assertEqual(r.failures, [("phpcs", "timed out after 1s")])
 

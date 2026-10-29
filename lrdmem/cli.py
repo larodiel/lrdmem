@@ -138,7 +138,7 @@ def _for(store: Store, g: Graph, args) -> int:
         return 0
     path = _repo_relative(args.file)
     session = Session(args.session or "")
-    picked = select(store, *scope, path=path, command=args.command, exclude=session.injected)
+    picked = select(store, *scope, paths=[path] if path else [], command=args.command, exclude=session.injected)
     if picked:
         _out(render(picked, path or args.command or ""))
         session.injected |= {m.slug for m in picked}

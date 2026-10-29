@@ -1,7 +1,8 @@
 import json
 from pathlib import Path
 
-from lrdmem.hooks import patch_path
+from lrdmem.hooks import patch_paths
+from lrdmem.session import Session
 from tests import test_hooks as th
 
 FIXTURES = Path(__file__).parent / "fixtures" / "codex"
@@ -18,7 +19,7 @@ class CodexHookTest(th._Base):
 
     def test_session_start_without_claude_link(self):
         self.store()
-        text = (th.ClaudeHookTest.header(self) + "\n\n## _global/MEMORY.md\n(empty)\n\n## work/_global/MEMORY.md\n"
+        text = (self.header() + "\n\n## _global/MEMORY.md\n(empty)\n\n## work/_global/MEMORY.md\n"
                 "(empty)\n\n## work/app/MEMORY.md\n- [PHP style](php-style.md) — tabs")
         self.assertEqual(json.loads(self.hook("session-start", self.payload("session_start"))),
                          self.ctx("SessionStart", text))
@@ -40,6 +41,17 @@ class CodexHookTest(th._Base):
         p["tool_input"]["command"] = "*** Begin Patch\n*** Add File: a.php\n+y\n*** End Patch\n"
         out = json.loads(self.hook("pre-tool", p))
         self.assertIn("## lrdmem: rules for src/a.php", out["hookSpecificOutput"]["additionalContext"])
+
+    def test_multi_file_patch_covers_every_file(self):
+        self.multi_store()
+        pre = self.payload("pre_tool_apply_patch", tool_input={"command": th.MULTI_PATCH})
+        self.assertEqual(json.loads(self.hook("pre-tool", pre)), self.ctx("PreToolUse", self.multi_rules()))
+        post = self.payload("post_tool_apply_patch", tool_input={"command": th.MULTI_PATCH})
+        self.assertEqual(json.loads(self.hook("post-tool", post)),
+                         self.ctx("PostToolUse", "lrdmem check failed: lint-all\ngot src/a.php src/b.php lib/c.js"))
+        self.assertEqual(Session("s1").edited, th.MULTI)
+        self.assertEqual(json.loads(self.hook("stop", self.payload("stop"))),
+                         {"decision": "block", "reason": "lrdmem check failed: stop-all\nlate src/a.php src/b.php lib/c.js"})
 
     def test_pre_command(self):
         self.store()
@@ -87,16 +99,15 @@ class CodexHookTest(th._Base):
         self.assertEqual(self.hook("stop", self.payload("stop")), "")
 
 
-class PatchPathTest(th.unittest.TestCase):
-    def test_first_added_or_updated_file(self):
-        self.assertEqual(patch_path("*** Begin Patch\n*** Update File: a.py\n@@\n*** Add File: b.py\n"), "a.py")
-        self.assertEqual(patch_path("*** Add File: dir/b c.py\n+x\n"), "dir/b c.py")
+class PatchPathsTest(th.unittest.TestCase):
+    def test_every_added_or_updated_file(self):
+        self.assertEqual(patch_paths(th.MULTI_PATCH), th.MULTI)
+        self.assertEqual(patch_paths("*** Add File: dir/b c.py\n+x\n*** Update File: dir/b c.py\n"), ["dir/b c.py"])
 
-    def test_move_target_and_deletes_skipped(self):
-        self.assertEqual(patch_path("*** Delete File: x\n*** Update File: a.py\n*** Move to: b.py\n"), "b.py")
-        self.assertEqual(patch_path("*** Update File: a.py\n*** Delete File: x\n*** Move to: b.py\n"), "a.py")
-        self.assertIsNone(patch_path("*** Begin Patch\n*** Delete File: x\n*** End Patch"))
-        self.assertIsNone(patch_path(""))
+    def test_move_only_renames_an_update_and_deletes_are_skipped(self):
+        self.assertEqual(patch_paths("*** Update File: a.py\n*** Delete File: x\n*** Move to: b.py\n"), ["a.py"])
+        self.assertEqual(patch_paths("*** Begin Patch\n*** Delete File: x\n*** End Patch"), [])
+        self.assertEqual(patch_paths(""), [])
 
 
 if __name__ == "__main__":
