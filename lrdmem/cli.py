@@ -242,6 +242,17 @@ def _experience(store: Store, g: Graph, args) -> int:
     return 0
 
 
+def _feedback(store: Store, g: Graph, args) -> int:
+    try:
+        e = experience.feedback(store, Path.cwd(), args.memory, args.verdict, agent=args.agent, note=args.note,
+                                device=config.load()["device"])
+    except experience.Refused as err:
+        print(printable(str(err)), file=sys.stderr)
+        return 1
+    _out(e.ref)
+    return 0
+
+
 def _propose(store: Store, g: Graph, args) -> int:
     try:
         try:
@@ -487,6 +498,12 @@ def _main(argv: list[str] | None) -> int:
     q.add_argument("--request-id", dest="request_id")
     q.add_argument("--env")
     q.add_argument("text", nargs="?")
+    p = sub.add_parser("feedback", help="report a recalled memory as useful, incorrect or irrelevant")
+    p.set_defaults(fn=_feedback)
+    p.add_argument("memory")
+    p.add_argument("verdict", choices=["useful", "incorrect", "irrelevant"])
+    p.add_argument("--note", default="")
+    p.add_argument("--agent", default="human")
     p = sub.add_parser("memory", help="propose memories extracted from an experience")
     msub = p.add_subparsers(dest="action", required=True)
     q = msub.add_parser("propose", help="validate and write candidates; a JSON payload on stdin")
