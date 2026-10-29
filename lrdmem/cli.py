@@ -10,6 +10,7 @@ from lrdmem import __version__, checks, config
 from lrdmem.export import to_dot, to_html, to_json
 from lrdmem.graph import AmbiguousSlug, Graph
 from lrdmem.hooks import dispatch
+from lrdmem.install import AGENTS, InstallError, install
 from lrdmem.learn import LearnRefused, learn
 from lrdmem.lint import lint, printable
 from lrdmem.pr import learn_pr
@@ -253,6 +254,24 @@ def _sync(store: Store, g: Graph, args) -> int:
     return 1 if any(r.error for r in results) else 0
 
 
+def _install(args) -> int:
+    try:
+        changes = install(args.agent, Path.home(), args.dry_run)
+    except InstallError as e:
+        print(printable(str(e)), file=sys.stderr)
+        return 1
+    if args.dry_run:
+        _out("Dry run: nothing was written. Planned changes:")
+    for line in changes:
+        _out(line)
+    if not changes:
+        _out("Already installed; nothing to change.")
+    elif args.agent == "codex":
+        _out("In Codex, run /hooks once to review and trust the new lrdmem hooks.")
+    _out("Obligations run only after 'lrdmem allow'.")
+    return 0
+
+
 def _hook(phase: str, agent: str) -> int:
     try:
         text = dispatch(phase, agent, sys.stdin.read())
@@ -339,11 +358,16 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--agent", default="claude", help="claude, codex or opencode")
     sub.add_parser("context", help="same as `hook session-start`").add_argument(
         "--agent", default="claude", help="claude, codex or opencode")
+    p = sub.add_parser("install", help="install lrdmem's hooks and skill into a harness's user config")
+    p.add_argument("--agent", choices=AGENTS, required=True)
+    p.add_argument("--dry-run", action="store_true", help="print the planned changes and write nothing")
     args = parser.parse_args(argv)
     if args.command in ("hook", "context"):
         return _hook(getattr(args, "phase", "session-start"), args.agent)
     if args.command == "config":
         return _config(args)
+    if args.command == "install":
+        return _install(args)
     if hasattr(args, "fn"):
         store = Store(store_root())
         return args.fn(store, Graph(store), args)
