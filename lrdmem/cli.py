@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from lrdmem import __version__, checks, config, experience, propose, revision
+from lrdmem import __version__, checks, config, experience, propose, recall, revision
 from lrdmem.export import to_dot, to_html, to_json
 from lrdmem.graph import AmbiguousSlug, Graph
 from lrdmem.hooks import HookInput, dispatch, handle
@@ -20,7 +20,6 @@ from lrdmem.stale import stale
 from lrdmem.store import (AmbiguousRepo, Context, Memory, Store, StoreFormatError, StoreNotConfigured, resolve,
                           store_root)
 from lrdmem.sync import sync
-from lrdmem.triggers import render, select
 
 
 def _out(text: str = "") -> None:
@@ -170,11 +169,33 @@ def _for(store: Store, g: Graph, args) -> int:
         return 0
     path = _repo_relative(args.file)
     session = Session(args.session or "")
-    picked = select(store, *scope, paths=[path] if path else [], command=args.command, exclude=session.injected)
+    picked = recall.recall(store, *scope, files=[path] if path else [], command=args.command, for_hook=True,
+                           exclude=session.injected)
     if picked:
-        _out(render(picked, path or args.command or ""))
-        session.injected |= {m.slug for m in picked}
+        _out(recall.render(picked, path or args.command or ""))
+        session.injected |= {h.node.ref for h in picked}
         session.save()
+    return 0
+
+
+def _recall(store: Store, g: Graph, args) -> int:
+    try:
+        scope = resolve(store, Path.cwd(), args.env)
+    except AmbiguousRepo as e:
+        print(printable(str(e)), file=sys.stderr)
+        return 2
+    if not scope:
+        print("lrdmem: this repo is not opted in (no folder in the store)", file=sys.stderr)
+        return 1
+    files = [_repo_relative(f) for f in args.file]
+    states = _csv(args.states)
+    hits = recall.recall(store, *scope, query=args.query, files=files, command=args.command,
+                         types=_csv(args.types) or None, states="all" if "all" in states else states or None,
+                         limit=args.limit, hops=args.hops, budget=args.budget)
+    if args.json:
+        _out(json.dumps(recall.to_json(hits), indent=2))
+    else:
+        _out(recall.render(hits, args.query or ", ".join(files) or args.command or ""))
     return 0
 
 
@@ -460,7 +481,19 @@ def _main(argv: list[str] | None) -> int:
     p.add_argument("--limit", type=_positive, default=20)
     p.add_argument("--json", action="store_true")
     p.add_argument("--env")
-    p = sub.add_parser("for", help="print memories triggered by a file or command")
+    p = sub.add_parser("recall", help="the memories most relevant to a task, with signals, relations and confidence")
+    p.set_defaults(fn=_recall)
+    p.add_argument("query", nargs="?", default="")
+    p.add_argument("--file", action="append", default=[])
+    p.add_argument("--command")
+    p.add_argument("--types", action="append", help="memory types (comma-separated)")
+    p.add_argument("--states", action="append", help="memory states (comma-separated), or all")
+    p.add_argument("--limit", type=_positive, default=10)
+    p.add_argument("--hops", type=int, default=2)
+    p.add_argument("--budget", type=_positive, default=1500)
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--env")
+    p = sub.add_parser("for", help="print the memories a hook injects for a file or command (recall for hooks)")
     p.set_defaults(fn=_for)
     p.add_argument("file", nargs="?")
     p.add_argument("--command")

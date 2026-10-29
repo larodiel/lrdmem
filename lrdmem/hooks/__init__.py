@@ -8,10 +8,11 @@ from pathlib import Path
 from lrdmem import config
 from lrdmem.checks import CheckResult, pending, problem, run_checks
 from lrdmem.lint import lint, printable
+from lrdmem.recall import recall, render
 from lrdmem.session import Session
 from lrdmem.store import Store, resolve, store_root
 from lrdmem.sync import autopush_enabled, pull, sync, toplevel
-from lrdmem.triggers import CAVEAT, render, select
+from lrdmem.triggers import CAVEAT
 
 PROMPT = "If this message corrects your work, record it: lrdmem learn --help."
 MAX_BLOCKS = 2
@@ -129,10 +130,11 @@ def _inject(inp: HookInput, s: _Scope) -> HookOutput:
     if not (inp.paths or inp.command):
         return HookOutput()
     session = Session(inp.session_id)
-    picked = select(s.store, s.env, s.repo, paths=inp.paths, command=inp.command, exclude=session.injected)
+    picked = recall(s.store, s.env, s.repo, files=inp.paths, command=inp.command, for_hook=True,
+                    exclude=session.injected)
     if not picked:
         return HookOutput()
-    session.injected |= {m.slug for m in picked}
+    session.injected |= {h.node.ref for h in picked}
     session.save()
     return HookOutput(render(picked, ", ".join(inp.paths) or inp.command or ""))
 

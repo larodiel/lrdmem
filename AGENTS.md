@@ -27,7 +27,8 @@ actionlint .github/workflows/*.yml                       # after editing workflo
 | `frontmatter.py` | parse/dump the YAML subset; `unsupported()` lines |
 | `store.py` | environments, folders, `Memory`/`Context`, `resolve(cwd)`, `store_root()` |
 | `graph.py` | memory/context graph, slug resolution, `find`/`hot`/`edges` |
-| `triggers.py` | `matches`, `select` (budgeted injection), `render` |
+| `triggers.py` | `in_scope`, `matches` (trigger globs/prefixes), `CAVEAT` |
+| `recall.py` | `recall` (scored, budgeted; hooks use `for_hook=True`), `render`, `to_json` |
 | `lint.py` | store checks, `SECRET`, `printable()` |
 | `learn.py`, `pr.py` | writing contexts/memories; PR review ingestion |
 | `checks.py`, `config.py` | obligation approval (hash allowlist) and execution; device config |

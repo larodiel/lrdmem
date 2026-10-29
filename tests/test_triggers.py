@@ -8,9 +8,8 @@ from pathlib import Path
 
 from lrdmem.cli import main
 from lrdmem.store import Store
-from lrdmem.triggers import matches, render, select
+from lrdmem.triggers import matches
 from tests.fixtures import make_store
-from tests.test_hooks import CAVEAT
 
 
 def _mem(name, trig, kind="pattern", body="body"):
@@ -83,30 +82,6 @@ class TriggersTest(unittest.TestCase):
         self.assertTrue(matches(m, "work", "app", path="src/a.php"))
         self.assertTrue(matches(m, "work", "app", command="git commit -m x"))
 
-    def test_sort_tiebreak(self):
-        ctx = lambda i, ms: (f"work/app/contexts/2026-01-0{i}-c.md",
-                             f"---\nid: c{i}\ndate: 2026-01-0{i}\nsource: s\nagent: a\nmemories: [{ms}]\n---\nx\n")
-        files = {f"work/app/{n}.md": _mem(n, PHP) for n in ("b", "a", "c")}
-        files["work/app/o.md"] = _mem("o", PHP, kind="fact")
-        files.update(dict([ctx(1, "c"), ctx(2, "c"), ctx(3, "b")]))
-        got = select(Store(make_store(self.tmp, files)), "work", "app", paths=["a.php"])
-        self.assertEqual([m.slug for m in got], ["c", "b", "a", "o"])
-
-    def test_first_match_over_budget_gives_nothing(self):
-        store = Store(make_store(self.tmp, {"work/app/m.md": _mem("m", PHP, body="x" * 2000)}))
-        self.assertEqual(select(store, "work", "app", paths=["a.php"], budget=100), [])
-
-    def test_select_order_budget_exclude(self):
-        files = {f"work/app/m{i}.md": _mem(f"m{i}", PHP, body="x" * 2000) for i in range(10)}
-        files["work/app/ob.md"] = _mem("ob", PHP, kind="obligation", body="y")
-        store = Store(make_store(self.tmp, files))
-        got = select(store, "work", "app", paths=["a.php"], budget=1500)
-        self.assertEqual(got[0].slug, "ob")
-        self.assertLess(len(got), 11)
-        self.assertLessEqual(len(render(got, "a.php")) // 4, 1500)
-        self.assertEqual([m.slug for m in select(store, "work", "app", paths=["a.php"], exclude={"ob"}, budget=9999)][:1], ["m0"])
-        self.assertTrue(render(got[:1], "a.php").startswith("## lrdmem: rules for a.php\n" + CAVEAT + "\n\n### ob\ny"))
-
     def test_cli_for_not_opted_in(self):
         root = make_store(self.tmp, {"work/other/m.md": _mem("m", PHP)})
         repo = self.tmp / "app"
@@ -138,7 +113,7 @@ class TriggersTest(unittest.TestCase):
             out = io.StringIO()
             with redirect_stdout(out):
                 main(["for", "foo.php"])
-            self.assertIn("rules for sub/foo.php", out.getvalue())
+            self.assertIn("memories for sub/foo.php", out.getvalue())
         finally:
             os.chdir(old[0])
             os.environ["LRDMEM_STORE"] = old[1] if old[1] else ""
@@ -159,9 +134,9 @@ class TriggersTest(unittest.TestCase):
                 with redirect_stdout(out):
                     main(["for", *a])
                 return out.getvalue()
-            self.assertIn("rules for src/a.php", run(str(repo / "src/a.php")))
+            self.assertIn("memories for src/a.php", run(str(repo / "src/a.php")))
             self.assertEqual(run("a.js"), "")
-            self.assertIn("### m", run("a.php", "--session", "t5"))
+            self.assertIn("### work/app/m —", run("a.php", "--session", "t5"))
             self.assertEqual(run("a.php", "--session", "t5"), "")
         finally:
             os.chdir(old[0])

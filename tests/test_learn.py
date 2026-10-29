@@ -267,14 +267,15 @@ class LearnTest(unittest.TestCase):
             self.assertEqual(main(argv), 0)
             out.truncate(0)
             self.assertEqual(main(["for", "src/x.php"]), 0)
-        self.assertIn("### spaces", out.getvalue())
+        self.assertIn("### acme/web/spaces —", out.getvalue())
         t = parse((self.root / "acme/web/spaces.md").read_text())["triggers"]
         self.assertEqual(t, {"paths": ["**/*.php", "*.inc", "*.module"], "commands": ["composer"]})
         r = self.learn(memory="envwide", **dict(NEW, scope="env", description="Other topic", repos=["web"],
                                                  paths=["*.js"]))
         self.assertEqual(parse(r.memory.read_text())["triggers"], {"paths": ["*.js"], "repos": ["web"]})
-        from lrdmem.triggers import select
-        self.assertEqual([m.slug for m in select(self.store, "acme", "web", paths=["a.js"])], ["envwide"])
+        from lrdmem.recall import recall
+        self.assertEqual([h.node.slug for h in recall(self.store, "acme", "web", files=["a.js"], for_hook=True)],
+                         ["envwide"])
 
     def test_cli_prints_paths_and_refusals(self):
         import io

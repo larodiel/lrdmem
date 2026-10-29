@@ -29,7 +29,7 @@ class CodexHookTest(th._Base):
 
     def test_apply_patch_injects_once_per_session(self):
         self.store()
-        text = "## lrdmem: rules for src/a.php\n" + th.CAVEAT + "\n\n### php-style\n" + th.STYLE_BODY.strip() + "\n"
+        text = th.recalled("src/a.php", th.PHP_STYLE)
         out = self.hook("pre-tool", self.payload("pre_tool_apply_patch"))
         self.assertEqual(json.loads(out), self.ctx("PreToolUse", text))
         self.assertEqual(self.hook("pre-tool", self.payload("pre_tool_apply_patch")), "")
@@ -40,7 +40,7 @@ class CodexHookTest(th._Base):
         p = self.payload("pre_tool_apply_patch", cwd=str(self.repo / "src"))
         p["tool_input"]["command"] = "*** Begin Patch\n*** Add File: a.php\n+y\n*** End Patch\n"
         out = json.loads(self.hook("pre-tool", p))
-        self.assertIn("## lrdmem: rules for src/a.php", out["hookSpecificOutput"]["additionalContext"])
+        self.assertIn("## lrdmem: memories for src/a.php", out["hookSpecificOutput"]["additionalContext"])
 
     def test_multi_file_patch_covers_every_file(self):
         self.multi_store()
@@ -55,7 +55,7 @@ class CodexHookTest(th._Base):
 
     def test_pre_command(self):
         self.store()
-        text = "## lrdmem: rules for composer install\n" + th.CAVEAT + "\n\n### php-style\n" + th.STYLE_BODY.strip() + "\n"
+        text = th.recalled("composer install", th.PHP_STYLE[:3] + ("command trigger composer",))
         self.assertEqual(json.loads(self.hook("pre-tool", self.payload("pre_tool_bash"))),
                          self.ctx("PreToolUse", text))
 

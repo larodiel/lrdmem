@@ -33,7 +33,7 @@ class OpenCodeHookTest(th._Base):
 
     def test_pre_edit_injects_once_per_session(self):
         self.store()
-        text = "## lrdmem: rules for src/a.php\n" + th.CAVEAT + "\n\n### php-style\n" + th.STYLE_BODY.strip() + "\n\n"
+        text = th.recalled("src/a.php", th.PHP_STYLE) + "\n"
         self.assertEqual(self.hook("pre-tool", self.payload("pre_tool_edit")), text)
         self.assertEqual(self.hook("pre-tool", self.payload("pre_tool_edit")), "")
         self.assertEqual(self.hook("pre-tool", self.payload("pre_tool_edit", session_id="ses_2")), text)
@@ -41,7 +41,7 @@ class OpenCodeHookTest(th._Base):
     def test_patch_skips_deletes_and_follows_moves(self):
         self.store()
         self.assertTrue(self.hook("pre-tool", self.payload("pre_tool_patch")).startswith(
-            "## lrdmem: rules for src/a.php, c.php\n"))
+            "## lrdmem: memories for src/a.php, c.php\n"))
 
     def test_multi_file_patch_covers_every_file(self):
         self.multi_store()
@@ -53,7 +53,7 @@ class OpenCodeHookTest(th._Base):
 
     def test_pre_command(self):
         self.store()
-        text = "## lrdmem: rules for composer install\n" + th.CAVEAT + "\n\n### php-style\n" + th.STYLE_BODY.strip() + "\n\n"
+        text = th.recalled("composer install", th.PHP_STYLE[:3] + ("command trigger composer",)) + "\n"
         self.assertEqual(self.hook("pre-tool", self.payload("pre_tool_shell")), text)
 
     def test_other_tool_and_bad_input_are_noops(self):
