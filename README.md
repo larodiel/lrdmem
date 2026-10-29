@@ -6,6 +6,31 @@ A stdlib-only Python CLI that gives AI coding agents a shared, git-backed memory
 pipx install lrdmem
 ```
 
+## Usage
+
+```
+lrdmem find TERM | show SLUG | why SLUG | hot | stale     # read the store
+lrdmem for FILE [--command CMD]                           # memories that apply to a file or command
+lrdmem learn --help | sync | lint | graph --format html|json|dot -o OUT
+```
+
+## Store layout
+
+```
+<store>/_global/MEMORY.md             # facts about you, every repo
+<store>/<env>/_global/MEMORY.md       # company-wide (only trigger-injected with triggers.repos)
+<store>/<env>/<repo>/MEMORY.md        # one repo; contexts in <folder>/contexts/<YYYY-MM-DD>-<slug>.md
+```
+
+An environment is any top-level directory except `_global`, `bin` and names starting with `.` or `_`; symlinked
+directories count, and an environment may be its own git repository. A repo takes part only if `<env>/<repo>/` exists.
+
+## Migrating from bin/memory
+
+An existing `bin/memory` store works as is: same layout, no `kind` or contexts needed, `[[links]]` kept, and
+`bin/` and the root `README.md` are ignored. Point lrdmem at it with `lrdmem config set store <path>` (or
+`LRDMEM_STORE`), run `lrdmem lint`, then `lrdmem install --agent claude|codex|opencode` to replace the old hooks.
+
 Author: Victor Larodiel. MIT licensed.
 
 ## Harness support
