@@ -15,6 +15,7 @@ from lrdmem.learn import LearnRefused, learn
 from lrdmem.lint import lint, printable
 from lrdmem.pr import learn_pr
 from lrdmem.session import Session
+from lrdmem.search import candidates, expand
 from lrdmem.stale import stale
 from lrdmem.store import (AmbiguousRepo, Context, Memory, Store, StoreFormatError, StoreNotConfigured, resolve,
                           store_root)
@@ -119,6 +120,28 @@ def _stale(store: Store, g: Graph, args) -> int:
     for m, path in found:
         _out(f"{_rel(store, m)}: {path}")
     return 1 if found else 0
+
+
+def _associate(store: Store, g: Graph, args) -> int:
+    try:
+        scope = resolve(store, Path.cwd(), args.env)
+    except AmbiguousRepo as e:
+        print(printable(str(e)), file=sys.stderr)
+        return 2
+    if not scope:
+        print("lrdmem: this repo is not opted in (no folder in the store)", file=sys.stderr)
+        return 1
+    files = [_repo_relative(f) for f in args.file]
+    found = candidates(store, *scope, query=args.query, files=files, command=args.command, limit=args.limit)
+    hits = expand(store, found, limit=args.limit, env=scope[0], repo=scope[1])
+    if args.json:
+        _out(json.dumps([{"ref": h.node.ref, "score": round(h.score, 4), "memory_type": h.node.memory_type,
+                          "state": h.node.state, "signals": h.signals, "hops": h.hops, "via": h.via}
+                         for h in hits], indent=2))
+    else:
+        for h in hits:
+            _out(f"{h.node.ref}  {h.score:.2f}  {h.node.memory_type}/{h.node.state}  {'; '.join(h.signals)}")
+    return 0
 
 
 def _graph(store: Store, g: Graph, args) -> int:
@@ -387,6 +410,14 @@ def _main(argv: list[str] | None) -> int:
     p.set_defaults(fn=_graph)
     p.add_argument("--format", choices=["html", "json", "dot"], default="html")
     p.add_argument("-o", "--output")
+    p = sub.add_parser("associate", help="list memories associated with a text, file or command, with signals")
+    p.set_defaults(fn=_associate)
+    p.add_argument("query", nargs="?", default="")
+    p.add_argument("--file", action="append", default=[])
+    p.add_argument("--command")
+    p.add_argument("--limit", type=int, default=20)
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--env")
     p = sub.add_parser("for", help="print memories triggered by a file or command")
     p.set_defaults(fn=_for)
     p.add_argument("file", nargs="?")
