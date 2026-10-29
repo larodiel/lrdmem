@@ -7,7 +7,7 @@ of indented `key: value` lines; values may be quoted or inline lists; list items
 
 import json
 
-_SPECIAL = (",", "]", ":", " ", "'", '"', "{")
+_SPECIAL = (",", "]", ":", " ", "'", '"', "{", "[")
 
 
 def _unquote(value: str) -> str:
@@ -22,7 +22,7 @@ def _unquote(value: str) -> str:
 
 
 def _split_top(inner: str, sep: str) -> list[str]:
-    """Split on sep outside quotes and outside nested {} / []."""
+    """Split on sep outside quotes and outside nested {}."""
     items, cur, quote, depth = [], "", "", 0
     for ch in inner:
         if quote:
@@ -30,9 +30,9 @@ def _split_top(inner: str, sep: str) -> list[str]:
                 quote = ""
         elif ch in "\"'":
             quote = ch
-        elif ch in "{[":
+        elif ch == "{":
             depth += 1
-        elif ch in "}]":
+        elif ch == "}":
             depth -= 1
         elif ch == sep and depth <= 0:
             items.append(cur)
@@ -121,9 +121,15 @@ def _scalar(i: str) -> str:
     return json.dumps(i) if not i or any(c in i for c in _SPECIAL) else i
 
 
+def _key(k: str) -> str:
+    if not k or any(c in k for c in ":,{} \t\n\"'[]"):
+        raise ValueError(f"unsupported inline map key: {k!r}")
+    return k
+
+
 def _fmt(value) -> str:
     if isinstance(value, list):
-        items = ["{" + ", ".join(f"{k}: {_scalar(str(v))}" for k, v in i.items()) + "}" if isinstance(i, dict)
+        items = ["{" + ", ".join(f"{_key(k)}: {_scalar(str(v))}" for k, v in i.items()) + "}" if isinstance(i, dict)
                  else _scalar(i) for i in value]
         return "[" + ", ".join(items) + "]"
     text = str(value)

@@ -31,11 +31,16 @@ class Evidence:
 
     @classmethod
     def from_dict(cls, d: dict) -> "Evidence":
-        """Build from a parsed inline map; ValueError on an unknown kind or a non-finite/non-float weight."""
+        """Build from a parsed inline map.
+
+        ValueError on an unknown kind, an empty ref, or a weight that is not a float in [0, 1].
+        """
         if d.get("kind") not in EVIDENCE_KINDS:
             raise ValueError(f"unknown evidence kind: {d.get('kind')!r}")
         weight = float(d.get("weight", ""))
-        if not math.isfinite(weight):
+        if not d.get("ref"):
+            raise ValueError("evidence ref is empty")
+        if not math.isfinite(weight) or not 0 <= weight <= 1:
             raise ValueError(f"invalid evidence weight: {d.get('weight')!r}")
         return cls(str(d.get("ref", "")), d["kind"], weight)
 

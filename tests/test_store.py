@@ -18,6 +18,12 @@ class StoreTest(unittest.TestCase):
         self.tmp = Path(self._t.name)
         self.addCleanup(self._t.cleanup)
 
+    def test_dict_items_in_lists_are_ignored(self):
+        root = make_store(self.tmp, {"work/_global/a.md": _mem(extra="triggers:\n  paths: [{a:b}, x.py]\nsupersedes: [{a:b}, old]\n")})
+        m = Store(root).memories()[0]
+        self.assertEqual(m.triggers["paths"], ["x.py"])
+        self.assertEqual(m.supersedes, ["old"])
+
     def test_environments_filtered(self):
         root = make_store(self.tmp, {"work/_global/a.md": _mem(), "_global/g.md": _mem(),
                                      "bin/x": "", ".git/x": "", "_x/y": "", "home/app/a.md": _mem()})

@@ -28,6 +28,12 @@ class ModelTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 model.Evidence.from_dict({"ref": "a", "kind": "supports", "weight": w})
 
+    def test_evidence_rejects_empty_ref_and_out_of_range_weight(self):
+        for d in ({"ref": "", "kind": "supports", "weight": "1"}, {"ref": "a", "kind": "supports", "weight": "1.5"},
+                  {"ref": "a", "kind": "supports", "weight": "-0.1"}):
+            with self.assertRaises(ValueError):
+                model.Evidence.from_dict(d)
+
     def test_v01_kind_mapping(self):
         for k, t in (("obligation", "procedural"), ("pattern", "procedural"), ("fact", "semantic"), ("zzz", "semantic")):
             self.assertEqual(model.v01_memory_type(k), t)

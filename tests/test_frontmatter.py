@@ -42,9 +42,29 @@ class FrontmatterTest(unittest.TestCase):
                          [{"ref": "a/b", "kind": "supports"}, {"ref": "c"}])
 
     def test_inline_map_nested_kept_as_raw_string(self):
-        d = parse("---\ne: [{a: {b: c}, d: [x, y]}]\n---\n")
-        self.assertEqual(d["e"], [{"a": "{b: c}", "d": "[x, y]"}])
+        d = parse("---\ne: [{a: {b: c}, d: z}]\n---\n")
+        self.assertEqual(d["e"], [{"a": "{b: c}", "d": "z"}])
         self.assertEqual(parse(dump(d) + "\n"), d)
+
+    def test_bracket_items_and_values_roundtrip(self):
+        d = {"p": ["a[b", "c"], "e": [{"k": "[", "j": "x"}]}
+        self.assertEqual(parse(dump(d) + "\n"), d)
+        self.assertEqual(parse("---\np: [a[b, c]\n---\n")["p"], ["a[b", "c"])
+
+    def test_v01_brace_glob_and_map_like_item(self):
+        self.assertEqual(parse("---\np: [src/{a,b}.py, c]\n---\n")["p"], ["src/{a,b}.py", "c"])
+        self.assertEqual(parse("---\np: [{a:b}]\n---\n")["p"], [{"a": "b"}])
+
+    def test_bad_map_key_rejected(self):
+        for k in ("a b", "a:b", "a,b", "a}", "{a", ""):
+            with self.assertRaises(ValueError):
+                dump({"e": [{k: "v"}]})
+
+    def test_v01_dump_bytes_unchanged(self):
+        d = {"name": "a", "description": "x y: z", "metadata": {"type": "feedback", "updated": "2026-10-28"},
+             "triggers": {"paths": ["**/*.php", "src/a b.py"], "commands": ["git push"]}, "supersedes": ["old"]}
+        self.assertEqual(dump(d), '---\nname: a\ndescription: x y: z\nmetadata:\n  type: feedback\n  updated: 2026-10-28\n'
+                         'triggers:\n  paths: [**/*.php, "src/a b.py"]\n  commands: ["git push"]\nsupersedes: [old]\n---')
 
     def test_split_returns_body_and_quotes_stripped(self):
         data, body = split("---\nname: 'a'\nother: \"b\"\n---\nhello\n")

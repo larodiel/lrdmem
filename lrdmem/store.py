@@ -25,7 +25,7 @@ class AmbiguousRepo(Exception):
 def _list(value) -> list:
     if value is None or value == {}:  # an empty `key:` parses as {}
         return []
-    return value if isinstance(value, list) else [value]
+    return [v for v in value if isinstance(v, str)] if isinstance(value, list) else [value]
 
 
 def _str(value) -> str:
@@ -67,7 +67,7 @@ class Memory:
     def triggers(self) -> dict:
         """Trigger section, empty when absent."""
         t = self.data.get("triggers")
-        return t if isinstance(t, dict) else {}
+        return {k: _list(v) if isinstance(v, list) else v for k, v in t.items()} if isinstance(t, dict) else {}
 
     @property
     def check(self) -> dict | None:
