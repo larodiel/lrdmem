@@ -5,7 +5,6 @@ so repeating yourself never raises confidence.
 """
 
 import math
-import re
 from datetime import date, datetime, timedelta, timezone
 
 from lrdmem import config
@@ -40,33 +39,37 @@ def _when(exp: Experience) -> datetime | None:
 
 
 def independence_key(store: Store, ev: Evidence) -> tuple:
-    """`(agent, device, YYYY-MM-DD)` of the referenced experience; any other or unresolvable ref gives `(ref,)`."""
+    """`(agent, device, YYYY-MM-DD)` of the referenced experience; any other or unresolvable ref gives `(ref,)`.
+
+    Agent and device are stripped and lowercased; the date is the UTC calendar day of the experience.
+    """
     exp = _experience(store, ev.ref)
     if exp is None:
         return (ev.ref,)
-    return (exp.agent, exp.device, exp.date[:10])
+    when = _when(exp)
+    day = when.date().isoformat() if when else exp.date[:10]
+    return (exp.agent.strip().lower(), exp.device.strip().lower(), day)
 
 
 def confidence(store: Store, items: list[Evidence]) -> float:
     """Confidence in [0, 1] from evidence: `clamp(0, 1, 1 - exp(-(S - R)))`.
 
-    Items are deduplicated per (independence key, kind), keeping the max weight, so the same agent/device/day (or the
-    same ref) counts once. S sums the supports weights plus 0.25 x the observed_in weights; R sums the refutes
-    weights. Refutes can push S - R negative, which clamps to 0; no evidence gives 0.
+    Only evidence that resolves to an experience counts; any other ref (unresolvable, memory, edge, URL) adds
+    nothing, so made-up refs cannot inflate it. Per independence key (agent, device, day), positive evidence is the
+    max of the supports weight and 0.25 x the observed_in weight (never their sum), and refutes are the max refutes
+    weight; S and R sum those over keys. Refutes can push S - R negative, which clamps to 0; no evidence gives 0.
     """
-    best: dict[tuple, float] = {}
+    pos: dict[tuple, float] = {}
+    neg: dict[tuple, float] = {}
     for ev in items:
-        k = (independence_key(store, ev), ev.kind)
-        best[k] = max(best.get(k, 0.0), ev.weight)
-    s = r = 0.0
-    for (_, kind), w in best.items():
-        if kind == "supports":
-            s += w
-        elif kind == "refutes":
-            r += w
-        elif kind == "observed_in":
-            s += _OBSERVED * w
-    return _clamp(1 - math.exp(-(s - r)))
+        if _experience(store, ev.ref) is None:
+            continue
+        k = independence_key(store, ev)
+        if ev.kind == "refutes":
+            neg[k] = max(neg.get(k, 0.0), ev.weight)
+        elif ev.kind in ("supports", "observed_in"):
+            pos[k] = max(pos.get(k, 0.0), ev.weight * (_OBSERVED if ev.kind == "observed_in" else 1.0))
+    return _clamp(1 - math.exp(-(sum(pos.values()) - sum(neg.values()))))
 
 
 def has_outcome(store: Store, items: list[Evidence]) -> bool:
@@ -79,13 +82,9 @@ def has_outcome(store: Store, items: list[Evidence]) -> bool:
 
 
 def _irrelevant(exp: Experience) -> bool:
-    """A feedback experience whose `verdict` is irrelevant, or (no verdict) whose body says so."""
-    if exp.kind != "feedback":
-        return False
+    """A feedback experience whose `verdict` frontmatter field is irrelevant."""
     verdict = exp.data.get("verdict")
-    if isinstance(verdict, str) and verdict:
-        return verdict.strip().lower() == "irrelevant"
-    return re.search(r"\birrelevant\b", exp.body, re.I) is not None
+    return exp.kind == "feedback" and isinstance(verdict, str) and verdict.strip().lower() == "irrelevant"
 
 
 def priority(store: Store, node, now: datetime | None = None, cfg: dict | None = None) -> float:
@@ -95,9 +94,11 @@ def priority(store: Store, node, now: datetime | None = None, cfg: dict | None =
     `metadata.created`, none when absent); superseded/obsolete x 0.1; each irrelevant feedback in the last 30 days
     x 0.8; supporting evidence from the last 30 days x 1.2 (once). Irrelevant feedback is read from the node's
     evidence list: feedback experiences linked as `observed_in` with weight 0 (the Task 9 write contract) whose
-    `verdict: irrelevant` frontmatter (or, without a verdict, body) says irrelevant.
+    `verdict: irrelevant` frontmatter field says so (the body is never read).
     """
     now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
     p = 1.0
     if getattr(node, "memory_type", "") in ("episodic", "prospective"):
         half = (cfg if cfg is not None else config.load()).get("half_life_days", _DEFAULT_HALF_LIFE)

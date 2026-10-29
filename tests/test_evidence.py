@@ -56,11 +56,36 @@ class EvidenceTest(unittest.TestCase):
         self.assertEqual(evidence.independence_key(st, evs[0]), ("", "", "2026-10-01"))
         self.assertEqual(evidence.confidence(st, evs), evidence.confidence(st, evs[:1]))
 
-    def test_unresolvable_ref_key_and_duplicates_once(self):
-        st = self.build()
+    def test_unresolvable_ref_key(self):
         ev = Evidence("nope/x/experiences/y", "supports", 0.5)
-        self.assertEqual(evidence.independence_key(st, ev), ("nope/x/experiences/y",))
-        self.assertEqual(evidence.confidence(st, [ev, ev]), evidence.confidence(st, [ev]))
+        self.assertEqual(evidence.independence_key(self.build(), ev), ("nope/x/experiences/y",))
+
+    def test_fabricated_and_non_experience_refs_count_zero(self):
+        st = self.build(exp("a"), mem("m"))
+        fake = [Evidence(f"nope/x/experiences/f{i}", "supports", 1.0) for i in range(5)]
+        fake.append(Evidence("acme/web/m", "supports", 1.0))
+        fake.append(Evidence("https://example.com/x", "supports", 1.0))
+        self.assertEqual(evidence.confidence(st, fake), 0.0)
+        self.assertEqual(evidence.confidence(st, [self.ev("a"), *fake]), evidence.confidence(st, [self.ev("a")]))
+
+    def test_supports_and_observed_in_not_summed(self):
+        st = self.build(exp("a"), exp("b", date="2026-10-20T11:00:00Z"))
+        sup = evidence.confidence(st, [self.ev("a")])
+        self.assertEqual(evidence.confidence(st, [self.ev("a"), self.ev("b", "observed_in")]), sup)
+        r = evidence.confidence(st, [self.ev("a", w=0.2), self.ev("b", "observed_in", 1.0)])
+        self.assertAlmostEqual(r, 1 - 2.718281828459045 ** -0.25)
+
+    def test_key_normalised_and_utc_date(self):
+        st = self.build(exp("a", agent="Claude ", device="MAC", date="2026-10-20T23:30:00-05:00"),
+                        exp("b", agent="claude", device="mac", date="2026-10-21T04:00:00Z"))
+        ka, kb = (evidence.independence_key(st, self.ev(n)) for n in "ab")
+        self.assertEqual(ka, ("claude", "mac", "2026-10-21"))
+        self.assertEqual(ka, kb)
+
+    def test_naive_now_is_utc(self):
+        st = self.build(mem("e", memory_type="episodic", created="2026-07-31"))
+        n = st.node("acme/web/e")
+        self.assertEqual(evidence.priority(st, n, NOW.replace(tzinfo=None), CFG), evidence.priority(st, n, NOW, CFG))
 
     def test_max_weight_kept_per_key(self):
         st = self.build(exp("a"), exp("b", date="2026-10-20T11:00:00Z"))
@@ -119,15 +144,16 @@ class EvidenceTest(unittest.TestCase):
         old = "2026-08-01T00:00:00Z"
         st = self.build(
             exp("f1", kind="feedback", extra="verdict: irrelevant\n"),
-            exp("f2", kind="feedback", body="This is irrelevant here", date="2026-10-25T00:00:00Z", agent="b"),
+            exp("f2", kind="feedback", extra="verdict: Irrelevant\n", date="2026-10-25T00:00:00Z", agent="b"),
+            exp("f5", kind="feedback", body="irrelevant", agent="e"),
             exp("f3", kind="feedback", extra="verdict: useful\n", body="not relevant? irrelevant", agent="c"),
             exp("f4", kind="feedback", extra="verdict: irrelevant\n", date=old, agent="d"),
             exp("sup", date="2026-10-28T00:00:00Z"),
-            self.with_ev("m", [(S + "f1", "observed_in", 0), (S + "f2", "observed_in", 0), (S + "f3", "observed_in", 0),
+            self.with_ev("m", [(S + "f1", "observed_in", 0), (S + "f2", "observed_in", 0), (S + "f3", "observed_in", 0), (S + "f5", "observed_in", 0),
                                (S + "f4", "observed_in", 0)], state="candidate"),
             self.with_ev("n", [(S + "sup", "supports", 1)], state="candidate"),
             self.with_ev("o", [(S + "sup", "supports", 1)], state="obsolete"))
-        self.assertAlmostEqual(self.prio(st, "m"), 0.64)  # f1, f2 only
+        self.assertAlmostEqual(self.prio(st, "m"), 0.64)  # f1, f2 only (verdict field only)
         self.assertEqual(self.prio(st, "n"), 1.0)  # 1.2 clamped
         self.assertAlmostEqual(self.prio(st, "o"), 0.12)  # boost applies under the cap
 
