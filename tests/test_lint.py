@@ -40,6 +40,13 @@ class LintTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as t:
             return lint(Store(make_store(Path(t), files)), env)
 
+
+    def test_unsupported_frontmatter_syntax(self):
+        msg = "unsupported frontmatter syntax; use inline lists [a, b]"
+        body = "**Why:** w\n**How to apply:** h [[g]]\n"
+        out = self.run_lint(clean(**{"work/app/a.md": mem(
+            "a", extra="triggers:\n  paths:\n    - '*.php'\n# note\nsupersedes: |\n  old\n", body=body)}))
+        self.assertEqual(out, [f"work/app/a.md:{n}: {msg}" for n in (10, 11, 12, 13)])
     def has(self, files, text):
         out = self.run_lint(files)
         self.assertTrue(any(text in p for p in out), out)

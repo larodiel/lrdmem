@@ -5,7 +5,7 @@ import re
 from datetime import date
 from pathlib import Path
 
-from lrdmem.frontmatter import split
+from lrdmem.frontmatter import split, unsupported
 from lrdmem.store import IGNORED, Context, Memory, Store
 
 TYPES = {"user", "feedback", "project", "reference"}
@@ -140,6 +140,8 @@ def lint(store: Store, env: str | None = None) -> list[str]:
             if data is None:
                 problems.append(f"{where}: no frontmatter")
                 continue
+            problems += [f"{where}:{n}: unsupported frontmatter syntax; use inline lists [a, b]"
+                         for n in unsupported(text)]
             item = cls(path.stem, path, e, repo, data, body)
             problems += [f"{where}: {msg}" for msg in check(item, text, known)]
     return problems

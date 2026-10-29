@@ -10,6 +10,7 @@ from lrdmem.cli import main
 from lrdmem.store import Store
 from lrdmem.triggers import matches, render, select
 from tests.fixtures import make_store
+from tests.test_hooks import CAVEAT
 
 
 def _mem(name, trig, kind="pattern", body="body"):
@@ -104,7 +105,7 @@ class TriggersTest(unittest.TestCase):
         self.assertLess(len(got), 11)
         self.assertLessEqual(len(render(got, "a.php")) // 4, 1500)
         self.assertEqual([m.slug for m in select(store, "work", "app", paths=["a.php"], exclude={"ob"}, budget=9999)][:1], ["m0"])
-        self.assertTrue(render(got[:1], "a.php").startswith("## lrdmem: rules for a.php\n\n### ob\ny"))
+        self.assertTrue(render(got[:1], "a.php").startswith("## lrdmem: rules for a.php\n" + CAVEAT + "\n\n### ob\ny"))
 
     def test_cli_for_not_opted_in(self):
         root = make_store(self.tmp, {"work/other/m.md": _mem("m", PHP)})

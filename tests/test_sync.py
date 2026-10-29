@@ -187,7 +187,7 @@ class SyncTest(unittest.TestCase):
         for kw in (k for k in calls if "env" in k):
             self.assertEqual(kw["stdin"], subprocess.DEVNULL)
             self.assertEqual(kw["env"]["GIT_TERMINAL_PROMPT"], "0")
-            self.assertIn("BatchMode=yes", kw["env"]["GIT_SSH_COMMAND"])
+            self.assertEqual(kw["env"]["GIT_SSH_COMMAND"], "ssh -o BatchMode=yes -o ConnectTimeout=3")
 
     def test_user_ssh_command_is_respected(self):
         a = self.clone("a")
@@ -244,6 +244,34 @@ class SyncTest(unittest.TestCase):
         self.assertEqual(g(root, "ls-files").split(), ["_global/m.md"])
         self.assertIn("?? y.md", g(root / "own", "status", "--porcelain"))
         self.assertIsNone(pull(Store(root), "_global"))
+
+    def test_root_sync_with_gitignored_env_repos(self):
+        root = self.tmp / "s"
+        write(root / ".gitignore", "work/\npersonal\n")
+        write(root / "_global" / "m.md", "m")
+        g(root, "init", "-q")
+        g(root, "init", "-q", "work")
+        write(root / "work" / "x.md", "x")
+        other = self.tmp / "personal-repo"
+        g(self.tmp, "init", "-q", str(other))
+        write(other / "y.md", "y")
+        (root / "personal").symlink_to(other)
+        res = {r.env: r for r in sync(Store(root))}
+        self.assertEqual(res["_global"], SyncResult("_global", True, False, None))
+        self.assertEqual(sorted(g(root, "ls-files").split()), [".gitignore", "_global/m.md"])
+        self.assertEqual(g(root, "status", "--porcelain"), "")
+
+    def test_skip_idle_does_no_network_when_nothing_to_push(self):
+        a = self.clone("a")
+        write(a.root / "work" / "x.md", "x")
+        sync(a)
+        g(a.root / "work", "remote", "set-url", "origin", str(self.tmp / "missing.git"))
+        self.assertEqual(sync(a, "work", skip_idle=True), [SyncResult("work", False, False, None)])
+        self.assertIsNotNone(sync(a, "work")[0].error)  # a manual sync still pulls
+        write(a.root / "work" / "y.md", "y")
+        [res] = sync(a, "work", skip_idle=True)
+        self.assertTrue(res.committed)
+        self.assertIn("pull failed", res.error)
 
     def test_toplevel_is_public(self):
         root = self.tmp / "s"

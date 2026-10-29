@@ -46,23 +46,39 @@ def _value(raw: str):
     return _unquote(raw)
 
 
+def _parts(text: str) -> tuple[str, str] | None:
+    """(header, body) of LF-normalised text, or None without frontmatter."""
+    if not text.startswith("---\n"):
+        return None
+    rest = text[4:]
+    if rest.startswith("---"):
+        return ("", rest[3:].lstrip("\n")) if rest[3:4] in ("", "\n") else None
+    end = rest.find("\n---")
+    while end != -1 and rest[end + 4:end + 5] not in ("", "\n"):
+        end = rest.find("\n---", end + 1)
+    return None if end == -1 else (rest[:end], rest[end + 5:])
+
+
+def unsupported(text: str) -> list[int]:
+    """1-based file line numbers of frontmatter lines outside the grammar: block lists, comments, block scalars."""
+    parts = _parts(text.replace("\r\n", "\n"))
+    if not parts or not parts[0]:
+        return []
+    out = []
+    for n, line in enumerate(parts[0].split("\n"), 2):
+        s = line.strip()
+        if s and (s.startswith(("-", "#")) or ":" not in s or s.partition(":")[2].strip()[:1] in ("|", ">")):
+            out.append(n)
+    return out
+
+
 def split(text: str) -> tuple[dict | None, str]:
     """Split text into (frontmatter data, body); data is None without frontmatter."""
     text = text.replace("\r\n", "\n")
-    if not text.startswith("---\n"):
+    parts = _parts(text)
+    if parts is None:
         return None, text
-    rest = text[4:]
-    if rest.startswith("---"):
-        head, body = "", rest[3:].lstrip("\n") if rest[3:4] in ("", "\n") else None
-        if body is None:
-            return None, text
-    else:
-        end = rest.find("\n---")
-        while end != -1 and rest[end + 4:end + 5] not in ("", "\n"):
-            end = rest.find("\n---", end + 1)
-        if end == -1:
-            return None, text
-        head, body = rest[:end], rest[end + 5:]
+    head, body = parts
     data: dict = {}
     section = None
     for line in head.split("\n"):

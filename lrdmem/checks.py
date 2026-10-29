@@ -1,9 +1,11 @@
 """Obligation checks: run `check.run` commands, but only the exact text a human approved on this device."""
 
 import hashlib
+import math
 import os
 import signal
 import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -108,16 +110,19 @@ def _kill(proc: subprocess.Popen) -> None:
         proc.wait()  # the shell itself got SIGKILL: reap it
 
 
-def run_checks(store: Store, env: str, repo: str, repo_root: Path, on: str, files: list[str], cfg: dict) -> CheckResult:
+def run_checks(store: Store, env: str, repo: str, repo_root: Path, on: str, files: list[str], cfg: dict,
+               budget: float | None = None) -> CheckResult:
     """Run the approved obligations for `on` against the files their triggers match; unapproved ones are never run.
 
-    File names are passed as argv to `sh -c`, never spliced into the command text.
+    budget is the wall-clock seconds shared by every check of this call (default TIMEOUT); each check gets what
+    is left of it. File names are passed as argv to `sh -c`, never spliced into the command text.
     """
     result = CheckResult()
+    deadline = time.monotonic() + (TIMEOUT if budget is None else budget)
     for m in store.memories():
         if not command_text(m) or m.check.get("on") != on:
             continue
-        hit = [f for f in files if matches(m, env, repo, path=f)]
+        hit = [f for f in files if matches(m, env, repo, path=f, env_wide=True)]
         if not hit:
             continue
         why = problem(m)
@@ -127,14 +132,18 @@ def run_checks(store: Store, env: str, repo: str, repo_root: Path, on: str, file
         if not _approved(store, m, cfg):
             result.skipped_pending.append(m.slug)
             continue
+        left = deadline - time.monotonic()
+        if left <= 0:
+            result.failures.append((m.slug, "not run: the check time budget is used up"))
+            continue
         argv = ["sh", "-c", _script(command_text(m)), "sh", *("./" + f if f.startswith("-") else f for f in hit)]
         proc = subprocess.Popen(argv, cwd=repo_root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                                 errors="replace", start_new_session=True)
         try:
-            out, _ = proc.communicate(timeout=TIMEOUT)
+            out, _ = proc.communicate(timeout=left)
         except subprocess.TimeoutExpired:
             _kill(proc)
-            result.failures.append((m.slug, f"timed out after {TIMEOUT}s"))
+            result.failures.append((m.slug, f"timed out after {math.ceil(left)}s"))
             continue
         if proc.returncode:
             result.failures.append((m.slug, "\n".join(out.splitlines()[-TAIL:])))

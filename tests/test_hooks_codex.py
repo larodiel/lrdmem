@@ -29,7 +29,7 @@ class CodexHookTest(th._Base):
 
     def test_apply_patch_injects_once_per_session(self):
         self.store()
-        text = "## lrdmem: rules for src/a.php\n\n### php-style\n" + th.STYLE_BODY.strip() + "\n"
+        text = "## lrdmem: rules for src/a.php\n" + th.CAVEAT + "\n\n### php-style\n" + th.STYLE_BODY.strip() + "\n"
         out = self.hook("pre-tool", self.payload("pre_tool_apply_patch"))
         self.assertEqual(json.loads(out), self.ctx("PreToolUse", text))
         self.assertEqual(self.hook("pre-tool", self.payload("pre_tool_apply_patch")), "")
@@ -55,7 +55,7 @@ class CodexHookTest(th._Base):
 
     def test_pre_command(self):
         self.store()
-        text = "## lrdmem: rules for composer install\n\n### php-style\n" + th.STYLE_BODY.strip() + "\n"
+        text = "## lrdmem: rules for composer install\n" + th.CAVEAT + "\n\n### php-style\n" + th.STYLE_BODY.strip() + "\n"
         self.assertEqual(json.loads(self.hook("pre-tool", self.payload("pre_tool_bash"))),
                          self.ctx("PreToolUse", text))
 

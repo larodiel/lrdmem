@@ -15,6 +15,7 @@ _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 _LINK = re.compile(r"\[\[([^\]]+)\]\]")
 _STOP = {"this", "that", "with", "from", "have", "when", "your", "what", "does", "into", "should", "never",
          "always", "using", "used", "about", "there", "their", "which", "would", "could", "than", "then"}
+_UPDATED = re.compile(r"^(\s+updated:\s*).*?(\r?)$")
 _RESERVED = {"memory", "readme", "contexts"}
 _SCOPES = ("repo", "env", "global")
 
@@ -92,14 +93,29 @@ def _create(path: Path, text: str) -> bool:
 
 
 def _touch(path: Path, today: str) -> None:
+    """Rewrite only the `updated:` line inside `metadata:`; anything else, or no such line, stays byte for byte."""
     # ponytail: read-modify-write without a lock; a concurrent edit of the same memory can be lost.
-    data, body = split(path.read_text(encoding="utf-8"))
-    if data is None:
+    with open(path, encoding="utf-8", newline="") as f:  # keep CRLF files CRLF
+        text = f.read()
+    if split(text)[0] is None:
         return
-    if not isinstance(data.get("metadata"), dict):
-        data["metadata"] = {}
-    data["metadata"]["updated"] = today
-    path.write_text(dump(data) + "\n" + body, encoding="utf-8")
+    lines = text.split("\n")
+    in_meta = False
+    for i, line in enumerate(lines[1:], 1):
+        if line.rstrip("\r") == "---":
+            return  # end of the header: no updated line in metadata
+        if not line.strip():
+            continue
+        if line[:1] not in (" ", "\t"):
+            key, colon, rest = line.partition(":")
+            in_meta = bool(colon) and key.strip() == "metadata" and not rest.strip()
+        elif in_meta:
+            m = _UPDATED.match(line)
+            if m:
+                lines[i] = f"{m.group(1)}{today}{m.group(2)}"
+                with open(path, "w", encoding="utf-8", newline="") as f:
+                    f.write("\n".join(lines))
+                return
 
 
 def _index(folder: Path, line: str) -> None:
@@ -114,9 +130,13 @@ def _index(folder: Path, line: str) -> None:
 
 def learn(store: Store, cwd: Path, *, memory: str, mistake: str, correction: str, scope: str, agent: str,
           source: str = "chat", files: list[str] = (), pr: str | None = None, kind: str | None = None,
-          description: str | None = None, body: str | None = None, env: str | None = None,
+          description: str | None = None, body: str | None = None, why: str | None = None, how: str | None = None,
+          paths: list[str] = (), commands: list[str] = (), repos: list[str] = (), env: str | None = None,
           new: bool = False, device: str = "") -> LearnResult:
-    """Write a context for `memory`, creating the memory when absent; raise LearnRefused on invalid input."""
+    """Write a context for `memory`, creating the memory when absent; raise LearnRefused on invalid input.
+
+    A new memory needs description, body, why and how; paths, commands and repos become its triggers.
+    """
     if not _SLUG.match(memory) or memory in _RESERVED:
         raise LearnRefused("memory slug must match ^[a-z0-9][a-z0-9-]{0,63}$ and not be memory, readme or contexts")
     if scope not in _SCOPES:
@@ -128,19 +148,22 @@ def learn(store: Store, cwd: Path, *, memory: str, mistake: str, correction: str
     if not mistake.strip() or not correction.strip() or not agent.strip():
         raise LearnRefused("mistake, correction and agent are required")
     oneline = {"agent": agent, "device": device, "pr": pr or "", "description": description or "",
-               **{f"files[{i}]": f for i, f in enumerate(files)}}
+               **{f"files[{i}]": f for i, f in enumerate(files)},
+               **{f"{name}[{i}]": v for name, vals in (("paths", paths), ("commands", commands), ("repos", repos))
+                  for i, v in enumerate(vals)}}
     if any("\n" in v or "\r" in v for v in oneline.values()):
-        raise LearnRefused("agent, device, pr, description and files must be single-line")
+        raise LearnRefused("agent, device, pr, description, files and triggers must be single-line")
     folder, vis_env = _folder(store, cwd, scope, env)
     path = folder / f"{memory}.md"
     for guard in (path, folder / "contexts", folder / "MEMORY.md"):
         if guard.is_symlink():
             raise LearnRefused(f"{guard.name} is a symlink; refusing to write through it")
     exists = path.exists()
-    if not exists and not (description and description.strip() and body and body.strip()):
-        raise LearnRefused(f"memory '{memory}' does not exist in this scope; description and body are required")
+    if not exists and not all(v and v.strip() for v in (description, body, why, how)):
+        raise LearnRefused(f"memory '{memory}' does not exist in this scope; description, body, why and how "
+                           "are required")
     _check_text(store, {"memory": memory, "mistake": mistake, "correction": correction, "body": body or "",
-                        **oneline}, scope, vis_env, memory)
+                        "why": why or "", "how": how or "", **oneline}, scope, vis_env, memory)
     if not exists:
         for m in store.memories():
             if m.slug == memory and m.path != path and (scope == "global" or m.env in (None, vis_env)):
@@ -154,8 +177,11 @@ def learn(store: Store, cwd: Path, *, memory: str, mistake: str, correction: str
     created = False
     if not exists:
         meta = {"type": "feedback", **({"kind": kind} if kind else {}), "author": agent, "updated": today}
-        created = _create(path, dump({"name": memory, "description": description, "metadata": meta})
-                          + "\n\n" + body.strip() + "\n")
+        triggers = {k: list(v) for k, v in (("paths", paths), ("commands", commands), ("repos", repos)) if v}
+        head = {"name": memory, "description": description, "metadata": meta,
+                **({"triggers": triggers} if triggers else {})}
+        text = f"{body.strip()}\n\n**Why:** {why.strip()}\n**How to apply:** {how.strip()}\n"
+        created = _create(path, dump(head) + "\n\n" + text)
         if created:
             _index(folder, f"- [{memory}]({memory}.md) — {description}")
     if not created:

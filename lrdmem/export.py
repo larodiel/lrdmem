@@ -19,7 +19,7 @@ def to_json(graph: Graph) -> dict:
     nodes = [
         {"id": _id(graph, m), "type": "memory", "kind": m.kind, "env": m.env or "", "label": m.slug,
          "strength": graph.strength(m)}
-        for m in graph._nodes.values()
+        for m in graph.memories()
     ]
     nodes += [
         {"id": _id(graph, c), "type": "context", "kind": "context", "env": c.env or "", "label": _first(c),

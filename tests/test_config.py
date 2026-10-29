@@ -34,6 +34,23 @@ class ConfigTest(unittest.TestCase):
             self.assertEqual(config.load()["allow"], {})
             self.assertEqual(config.load()["autopush"], {})
 
+    def test_corrupt_file_is_never_overwritten(self):
+        from contextlib import redirect_stderr
+        self.path.parent.mkdir()
+        for bad in ("{nope", "[1]"):
+            self.path.write_text(bad)
+            with self.assertRaises(config.ConfigError) as e:
+                config.save(config.load())
+            self.assertIn(str(self.path), str(e.exception))
+            err = io.StringIO()
+            with redirect_stderr(err):
+                self.assertEqual(main(["config", "set", "device", "x"]), 1)
+            self.assertIn(str(self.path), err.getvalue())
+            self.assertEqual(self.path.read_text(), bad)
+        self.path.write_text("{}")
+        config.save(config.load())  # a good file loaded later saves again
+        self.assertIn("device", json.loads(self.path.read_text()))
+
     def test_save_modes_and_unknown_keys(self):
         cfg = config.load()
         cfg["extra"] = {"a": 1}

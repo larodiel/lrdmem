@@ -15,7 +15,7 @@ from tests.fixtures import make_store
 
 TODAY = date.today().isoformat()
 KW = dict(mistake="used tabs", correction="use spaces", scope="repo", agent="claude")
-NEW = dict(KW, description="Indent with spaces always", body="**Why:** style.\n**How to apply:** spaces.")
+NEW = dict(KW, description="Indent with spaces always", body="Indent with spaces.", why="style.", how="spaces.")
 
 
 class LearnTest(unittest.TestCase):
@@ -178,6 +178,19 @@ class LearnTest(unittest.TestCase):
         self.assertEqual(parse(text)["metadata"]["updated"], TODAY)
         self.assertIn("**Why:** style.", text)
 
+    def test_touch_replaces_only_the_updated_line(self):
+        p = self.root / "acme/web/spaces.md"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        original = ("---\nname: spaces\n# keep this comment\ndescription: d\nmetadata:\n  type: feedback\n"
+                    "  updated: 2020-01-01\n  author: me\ntriggers:\n  paths:\n    - '*.py'\n---\nbody\n")
+        p.write_text(original)
+        self.learn(memory="spaces", **KW)
+        self.assertEqual(p.read_text(), original.replace("2020-01-01", TODAY))
+        no_updated = original.replace("  updated: 2020-01-01\n", "") + "updated: 2020-01-01\n"
+        p.write_text(no_updated)
+        self.learn(memory="spaces", **KW)
+        self.assertEqual(p.read_text(), no_updated)
+
     def test_unparseable_memory_untouched(self):
         (self.root / "acme/web/spaces.md").write_text("no frontmatter\n")
         self.learn(memory="spaces", **KW)
@@ -204,12 +217,46 @@ class LearnTest(unittest.TestCase):
         for i in range(8):
             self.assertIn(f"(slug-{i}.md)", idx)
 
+    def test_new_memory_needs_why_and_how_and_lints_clean(self):
+        from lrdmem.lint import lint
+        for missing in ("why", "how"):
+            with self.assertRaises(LearnRefused):
+                self.learn(memory="spaces", **{k: v for k, v in NEW.items() if k != missing})
+        self.assertFalse((self.root / "acme/web/spaces.md").exists())
+        r = self.learn(memory="spaces", **NEW)
+        self.assertTrue(r.memory.read_text().endswith(
+            "Indent with spaces.\n\n**Why:** style.\n**How to apply:** spaces.\n"))
+        self.assertEqual(lint(self.store), [])
+
+    def test_new_memory_triggers_and_lrdmem_for(self):
+        import io
+        from contextlib import redirect_stdout
+        from lrdmem.cli import main
+        argv = ["learn", "--memory", "spaces", "--mistake", "m", "--correction", "c", "--scope", "repo",
+                "--agent", "claude", "--description", "Indent with spaces always", "--body", "b", "--why", "w",
+                "--how", "h", "--paths", "**/*.php", "--paths", "*.inc,*.module", "--commands", "composer"]
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {"LRDMEM_STORE": str(self.root)}), mock.patch("os.getcwd", return_value=str(self.repo)), \
+                mock.patch("pathlib.Path.cwd", return_value=self.repo), redirect_stdout(out):
+            self.assertEqual(main(argv), 0)
+            out.truncate(0)
+            self.assertEqual(main(["for", "src/x.php"]), 0)
+        self.assertIn("### spaces", out.getvalue())
+        t = parse((self.root / "acme/web/spaces.md").read_text())["triggers"]
+        self.assertEqual(t, {"paths": ["**/*.php", "*.inc", "*.module"], "commands": ["composer"]})
+        r = self.learn(memory="envwide", **dict(NEW, scope="env", description="Other topic", repos=["web"],
+                                                 paths=["*.js"]))
+        self.assertEqual(parse(r.memory.read_text())["triggers"], {"paths": ["*.js"], "repos": ["web"]})
+        from lrdmem.triggers import select
+        self.assertEqual([m.slug for m in select(self.store, "acme", "web", paths=["a.js"])], ["envwide"])
+
     def test_cli_prints_paths_and_refusals(self):
         import io
         from contextlib import redirect_stderr, redirect_stdout
         from lrdmem.cli import main
         argv = ["learn", "--memory", "spaces", "--mistake", "m", "--correction", "c", "--scope", "repo",
-                "--agent", "claude", "--description", "Indent with spaces always", "--body", "b", "--files", "a.py", "b.py"]
+                "--agent", "claude", "--description", "Indent with spaces always", "--body", "b", "--why", "w", "--how", "h",
+                "--files", "a.py", "b.py"]
         out, err = io.StringIO(), io.StringIO()
         with mock.patch.dict(os.environ, {"LRDMEM_STORE": str(self.root)}), mock.patch("os.getcwd", return_value=str(self.repo)), \
                 mock.patch("pathlib.Path.cwd", return_value=self.repo), redirect_stdout(out), redirect_stderr(err):

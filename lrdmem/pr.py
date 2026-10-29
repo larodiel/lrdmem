@@ -20,10 +20,12 @@ _MISTAKE = 300
 
 @dataclass
 class PrResult:
-    """Outcome of learn_pr: (comment url, memory path relative to the store) pairs and the comments left over."""
+    """Outcome of learn_pr: (comment url, memory path relative to the store) pairs, the comments left over, and
+    the urls of comments an earlier run already linked."""
 
     linked: list[tuple[str, str]] = field(default_factory=list)
     unmatched: list[dict] = field(default_factory=list)
+    already: list[str] = field(default_factory=list)
 
 
 def _parse(url: str) -> tuple[str, str, str]:
@@ -100,8 +102,12 @@ def learn_pr(store: Store, cwd: Path, url: str, agent: str, run=subprocess.run, 
                    key=lambda m: m.slug)
     words = [(m, terms(m.slug.replace("-", " ") + " " + m.description)) for m in cands]
     result = PrResult()
+    seen = {c.data.get("pr") for c in store.contexts()}
     for c in comments:
         if c["author"].endswith("[bot]"):
+            continue
+        if c["url"] and c["url"] in seen:
+            result.already.append(c["url"])
             continue
         if c["association"] not in _TRUSTED:  # anyone can comment on a public repo; only maintainers feed memory
             result.unmatched.append({**c, "note": c["association"]})
@@ -119,5 +125,6 @@ def learn_pr(store: Store, cwd: Path, url: str, agent: str, run=subprocess.run, 
         except Exception as err:  # untrusted input: never abort the run
             print(printable(f"skipped {c['url']}: {err}"), file=sys.stderr)
             continue
+        seen.add(c["url"])
         result.linked.append((c["url"], best.path.relative_to(store.root).as_posix()))
     return result

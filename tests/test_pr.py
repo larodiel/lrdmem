@@ -107,6 +107,19 @@ class PrTest(unittest.TestCase):
         self.assertIn("**Mistake:** Please indent with spaces, tabs are wrong here. thanks", text)
         self.assertFalse((self.root / "acme/other/contexts").exists())  # aaa matches equally well but is another repo's
 
+    def test_rerun_is_idempotent(self):
+        run = fake_run([comment(1, "Please indent with spaces, tabs are wrong here.")])
+        learn_pr(self.store, self.repo, URL, "claude", run)
+        r = learn_pr(self.store, self.repo, URL, "claude", run)
+        self.assertEqual((r.linked, r.already), ([], [URL + "#discussion_r1"]))
+        self.assertEqual(len(list((self.root / "acme/web/contexts").glob("*.md"))), 1)
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {"LRDMEM_STORE": str(self.root)}), \
+                mock.patch("lrdmem.pr.fetch_review_comments", lambda u, run_=None: fetch_review_comments(u, run)), \
+                mock.patch("pathlib.Path.cwd", return_value=self.repo), redirect_stdout(out):
+            self.assertEqual(main(["learn-pr", URL, "--agent", "claude"]), 0)
+        self.assertEqual(out.getvalue(), f"already linked {URL}#discussion_r1\n")
+
     def test_tie_first_by_slug(self):
         (self.root / "acme/web/alpha-rule.md").write_text(MEM.format("alpha-rule", "Indent code with spaces never tabs"))
         r = learn_pr(self.store, self.repo, URL, "claude", fake_run([comment(1, "indent code with spaces")]))

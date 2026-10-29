@@ -14,6 +14,10 @@ _KIND = {"user": "fact", "reference": "fact", "feedback": "pattern", "project": 
 _LINK = re.compile(r"\[\[([^\]]+)\]\]")
 
 
+class StoreNotConfigured(RuntimeError):
+    """Raised by store_root() when neither $LRDMEM_STORE nor the config names a store."""
+
+
 class AmbiguousRepo(Exception):
     """Raised when a repo exists in more than one environment and no env was given."""
 
@@ -209,5 +213,5 @@ def store_root() -> Path:
     """Store root: $LRDMEM_STORE, else the configured store; RuntimeError when neither is set."""
     value = os.environ.get("LRDMEM_STORE") or config.load()["store"]
     if not value:
-        raise RuntimeError("store not configured: set LRDMEM_STORE or run `lrdmem config set store PATH`")
+        raise StoreNotConfigured("no store configured — run 'lrdmem config set store <path>' or set LRDMEM_STORE")
     return Path(value)

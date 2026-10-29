@@ -175,6 +175,34 @@ class ChecksTest(_Base):
         self.assertTrue((self.repo / "ran.txt").exists())
 
 
+    def test_env_global_obligation_runs_in_every_repo_of_env(self):
+        narrowed = _ob("printf y > other.txt").replace("triggers:\n", "triggers:\n  repos: [other]\n")
+        self.root = make_store(self.tmp, {"work/_global/envwide.md": _ob("printf x > ran.txt"),
+                                          "work/_global/narrow.md": narrowed, "work/app/MEMORY.md": ""})
+        self.store = Store(self.root)
+        cfg = config.load()
+        for m in self.store.memories():
+            cfg["allow"][checks.key(self.store, m)] = checks.command_hash(m)
+        r = self._run(["a.php"], cfg=cfg)
+        self.assertEqual((r.ran, r.failures, r.skipped_pending), (["envwide"], [], []))
+        self.assertTrue((self.repo / "ran.txt").exists())
+        self.assertFalse((self.repo / "other.txt").exists())
+        self.assertEqual(self._run(["a.txt"], cfg=cfg).ran, [])
+
+    def test_budget_is_shared_and_slow_second_check_times_out(self):
+        self.root = make_store(self.tmp, {"work/app/a-first.md": _ob("sleep 1"),
+                                          "work/app/b-slow.md": _ob("sleep 30")})
+        self.store = Store(self.root)
+        cfg = config.load()
+        for m in self.store.memories():
+            cfg["allow"][checks.key(self.store, m)] = checks.command_hash(m)
+        start = time.monotonic()
+        r = checks.run_checks(self.store, "work", "app", self.repo, "post-edit", ["a.php"], cfg, budget=2)
+        self.assertLess(time.monotonic() - start, 4)
+        self.assertEqual(r.ran, ["a-first"])
+        self.assertEqual(r.failures, [("b-slow", "timed out after 1s")])
+
+
 class CliChecksTest(_Base):
     def setUp(self):
         super().setUp()
@@ -226,6 +254,16 @@ class CliChecksTest(_Base):
         code, _, err = self._main("allow", "phpcs")
         self.assertEqual(code, 2)
         self.assertIn("work/app/phpcs", err)
+
+    def test_check_files_are_repo_relative(self):
+        self._store("echo got {files} && exit 1", paths="'src/*.php'")
+        os.environ["LRDMEM_STORE"] = str(self.root)
+        self.assertEqual(self._main("allow", "phpcs")[0], 0)
+        (self.repo / "src").mkdir()
+        os.chdir(self.repo / "src")
+        code, out, _ = self._main("check", "--on", "post-edit", "--files", "a.php")
+        self.assertEqual(code, 1)
+        self.assertIn("got src/a.php", out)
 
     def test_check_not_opted_in_is_silent(self):
         self.root = make_store(self.tmp, {"work/other/m.md": _ob("true")})

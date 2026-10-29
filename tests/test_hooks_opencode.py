@@ -33,7 +33,7 @@ class OpenCodeHookTest(th._Base):
 
     def test_pre_edit_injects_once_per_session(self):
         self.store()
-        text = "## lrdmem: rules for src/a.php\n\n### php-style\n" + th.STYLE_BODY.strip() + "\n\n"
+        text = "## lrdmem: rules for src/a.php\n" + th.CAVEAT + "\n\n### php-style\n" + th.STYLE_BODY.strip() + "\n\n"
         self.assertEqual(self.hook("pre-tool", self.payload("pre_tool_edit")), text)
         self.assertEqual(self.hook("pre-tool", self.payload("pre_tool_edit")), "")
         self.assertEqual(self.hook("pre-tool", self.payload("pre_tool_edit", session_id="ses_2")), text)
@@ -53,7 +53,7 @@ class OpenCodeHookTest(th._Base):
 
     def test_pre_command(self):
         self.store()
-        text = "## lrdmem: rules for composer install\n\n### php-style\n" + th.STYLE_BODY.strip() + "\n\n"
+        text = "## lrdmem: rules for composer install\n" + th.CAVEAT + "\n\n### php-style\n" + th.STYLE_BODY.strip() + "\n\n"
         self.assertEqual(self.hook("pre-tool", self.payload("pre_tool_shell")), text)
 
     def test_other_tool_and_bad_input_are_noops(self):
@@ -70,6 +70,17 @@ class OpenCodeHookTest(th._Base):
         self.approve(store, "stop-php")
         self.assertEqual(self.hook("post-tool", self.payload("post_tool_write")),
                          FAIL + "lrdmem check failed: stop-php\nlate src/a.php\n")
+
+    def test_post_edit_checks_share_a_four_second_budget(self):
+        store = self.store({"work/app/lint-php.md": th._ob("sleep 1", "post-edit"),
+                            "work/app/stop-php.md": th._ob("exit 1", "stop", "stop-php")})
+        self.approve(store)
+        self.approve(store, "stop-php")
+        with th.mock.patch("lrdmem.hooks.run_checks", wraps=th.checks.run_checks) as rc:
+            self.hook("post-tool", self.payload("post_tool_write"))
+        first, second = (c.kwargs["budget"] for c in rc.call_args_list)
+        self.assertAlmostEqual(first, 4, delta=0.2)
+        self.assertLess(second, 3.1)
 
     def test_post_edit_passing_prints_nothing(self):
         self.store()

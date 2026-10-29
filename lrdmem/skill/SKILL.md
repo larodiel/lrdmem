@@ -61,7 +61,10 @@ lrdmem learn --scope repo --agent claude --memory phpunit-data-provider \
   --correction "user asked for one test with a data provider" \
   --files tests/FooTest.php --kind pattern \
   --description "Repeated test cases use a data provider" \
-  --body "Cases that differ only in input and expected value share one test with a data provider."
+  --body "Cases that differ only in input and expected value share one test with a data provider." \
+  --why "the user wants one test per behaviour, not one per input" \
+  --how "move the inputs into a data provider and keep a single test method" \
+  --paths "tests/**/*Test.php"
 ```
 
 Environment rule, for every repository of the company:
@@ -71,7 +74,10 @@ lrdmem learn --scope env --agent claude --memory changelog-entry-format \
   --mistake "changelog entry described the code, not the user-visible change" \
   --correction "user rewrote it from the user's point of view" \
   --description "Changelog entries describe what the user sees" \
-  --body "Write each entry as the change a user notices, not the code that changed."
+  --body "Write each entry as the change a user notices, not the code that changed." \
+  --why "changelogs are read by users, not by developers" \
+  --how "describe the behaviour before and after, never class or method names" \
+  --paths "changelog/*,CHANGELOG.md" --repos plugin-a,plugin-b
 ```
 
 Global preference about the user:
@@ -80,12 +86,20 @@ Global preference about the user:
 lrdmem learn --scope global --agent claude --memory no-emojis \
   --mistake "used emojis in a reply" --correction "user asked for plain text" \
   --kind fact --description "No emojis in replies, code or commit messages" \
-  --body "Plain text only, including headings, lists and commit messages."
+  --body "Plain text only, including headings, lists and commit messages." \
+  --why "the user finds them noisy" --how "write plain words where an emoji would go"
 ```
 
 Pass `--agent` with your own harness (claude, codex or opencode). `--memory` names an
 existing slug to add a context to it; a new slug creates the memory, which needs
-`--description` and `--body` (`--kind` is optional). `--source pr --pr <url>` records a
+`--description`, `--body`, `--why` and `--how` (`--kind` is optional).
+
+Set triggers on a new memory so hooks show it to the next agent at the right moment:
+`--paths` (globs, relative to the repository root) for the files it applies to, and
+`--commands` for command prefixes. An `--scope env` memory is only shown in the
+repositories named by `--repos`, so always pass `--repos` with it. Each flag can be
+repeated or take a comma-separated list. A memory without triggers is only found by
+search. `--source pr --pr <url>` records a
 review comment instead of a chat correction.
 
 ## Pull request reviews: `lrdmem learn-pr`

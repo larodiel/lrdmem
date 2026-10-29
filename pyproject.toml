@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lrdmem"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Shared git-backed memory store for AI coding agents"
 readme = "README.md"
 license = { text = "MIT" }
@@ -20,6 +20,9 @@ lrdmem = "lrdmem.cli:main"
 
 [tool.setuptools]
 packages = ["lrdmem", "lrdmem.hooks"]
+
+[tool.setuptools.dynamic]
+version = { attr = "lrdmem.__version__" }
 
 [tool.setuptools.package-data]
 lrdmem = ["skill/*", "hooks/*.js"]

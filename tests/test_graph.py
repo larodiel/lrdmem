@@ -40,6 +40,13 @@ class GraphTest(unittest.TestCase):
         self.root = make_store(Path(t.name), _files())
         self.g = Graph(Store(self.root))
 
+    def test_memories_accessor(self):
+        self.assertEqual(sorted((m.env or "", m.slug) for m in self.g.memories()),
+                         [("", "style"), ("home", "phpcs"), ("work", "lonely"), ("work", "other"), ("work", "phpcs")])
+        import inspect
+        from lrdmem import export
+        self.assertNotIn("_nodes", inspect.getsource(export))
+
     def test_strength_and_hot(self):
         self.assertEqual(self.g.strength("phpcs", env="work"), 3)
         self.assertEqual(self.g.strength("phpcs", env="home"), 0)

@@ -6,20 +6,32 @@ import socket
 import tempfile
 from pathlib import Path
 
+_corrupt: set[Path] = set()  # config files load() found unreadable as JSON objects; save() never overwrites them
+
+
+class ConfigError(Exception):
+    """Raised by save() when the config file on disk is corrupt and would be lost."""
+
 
 def _path() -> Path:
     return Path(os.environ.get("LRDMEM_CONFIG") or Path.home() / ".config" / "lrdmem" / "config.json")
 
 
 def load() -> dict:
-    """The config with defaults filled in; a missing or corrupt file yields the defaults."""
+    """The config with defaults filled in; a missing or corrupt file yields the defaults (and save() then refuses)."""
     cfg = {"store": None, "device": socket.gethostname(), "autopush": {}, "allow": {}}
+    path = _path()
+    _corrupt.discard(path)
     try:
-        data = json.loads(_path().read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
         return cfg
-    if isinstance(data, dict):
-        cfg.update(data)
+    except (OSError, ValueError):
+        data = None
+    if not isinstance(data, dict):
+        _corrupt.add(path)
+        return cfg
+    cfg.update(data)
     for key in ("autopush", "allow"):
         if not isinstance(cfg[key], dict):
             cfg[key] = {}
@@ -31,8 +43,13 @@ def load() -> dict:
 
 
 def save(cfg: dict) -> None:
-    """Atomically write the config (file 0600, parent dir 0700); unknown keys are kept as given."""
+    """Atomically write the config (file 0600, parent dir 0700); unknown keys are kept as given.
+
+    Raises ConfigError instead of overwriting a file that load() found corrupt.
+    """
     path = _path()
+    if path in _corrupt:
+        raise ConfigError(f"{path} is not a valid JSON object; fix or remove it, then retry (nothing was written)")
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     if path.parent.name == "lrdmem" and path.parent.stat().st_uid == os.getuid():  # never tighten e.g. $HOME
         os.chmod(path.parent, 0o700)

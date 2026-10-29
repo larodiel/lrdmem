@@ -9,14 +9,14 @@ from pathlib import Path
 from lrdmem import __version__, checks, config
 from lrdmem.export import to_dot, to_html, to_json
 from lrdmem.graph import AmbiguousSlug, Graph
-from lrdmem.hooks import dispatch
+from lrdmem.hooks import HookInput, dispatch, handle
 from lrdmem.install import AGENTS, InstallError, install
 from lrdmem.learn import LearnRefused, learn
 from lrdmem.lint import lint, printable
 from lrdmem.pr import learn_pr
 from lrdmem.session import Session
 from lrdmem.stale import stale
-from lrdmem.store import AmbiguousRepo, Context, Memory, Store, resolve, store_root
+from lrdmem.store import AmbiguousRepo, Context, Memory, Store, StoreNotConfigured, resolve, store_root
 from lrdmem.sync import sync
 from lrdmem.triggers import render, select
 
@@ -147,11 +147,17 @@ def _for(store: Store, g: Graph, args) -> int:
     return 0
 
 
+def _csv(values: list[str] | None) -> list[str]:
+    return [v.strip() for value in values or [] for v in value.split(",") if v.strip()]
+
+
 def _learn(store: Store, g: Graph, args) -> int:
     try:
         r = learn(store, Path.cwd(), memory=args.memory, mistake=args.mistake, correction=args.correction,
                   scope=args.scope, agent=args.agent, source=args.source, files=args.files, pr=args.pr,
-                  kind=args.kind, description=args.description, body=args.body, env=args.env, new=args.new,
+                  kind=args.kind, description=args.description, body=args.body, why=args.why, how=args.how,
+                  paths=_csv(args.paths), commands=_csv(args.commands), repos=_csv(args.repos), env=args.env,
+                  new=args.new,
                   device=config.load()["device"])
     except LearnRefused as e:
         print(printable(str(e)), file=sys.stderr)
@@ -173,6 +179,8 @@ def _learn_pr(store: Store, g: Graph, args) -> int:
     except (ValueError, LookupError, AmbiguousRepo, RuntimeError, OSError) as e:
         print(printable(str(e)), file=sys.stderr)
         return 2 if isinstance(e, ValueError) else 1
+    for url in r.already:
+        _out(f"already linked {url}")
     for url, rel in r.linked:
         _out(f"linked {url} -> {rel}")
     for c in r.unmatched:
@@ -232,7 +240,8 @@ def _check(store: Store, g: Graph, args) -> int:
     root = _git_root()
     if not scope or not root:
         return 0
-    r = checks.run_checks(store, *scope, root, args.on, args.files, config.load())
+    files = [_repo_relative(f) for f in args.files]
+    r = checks.run_checks(store, *scope, root, args.on, files, config.load())
     for slug, tail in r.failures:
         _out(f"lrdmem check failed: {slug}")
         _out(tail)
@@ -272,6 +281,19 @@ def _install(args) -> int:
     return 0
 
 
+def _context(agent: str) -> int:
+    """`lrdmem context`: hook JSON when a harness pipes stdin, the plain session-start text for a human."""
+    if not sys.stdin.isatty():
+        return _hook("session-start", agent)
+    try:
+        text = handle(HookInput("session-start", "", Path.cwd())).context
+    except Exception:
+        return 0
+    if text:
+        _out(text)
+    return 0
+
+
 def _hook(phase: str, agent: str) -> int:
     try:
         text = dispatch(phase, agent, sys.stdin.read())
@@ -284,6 +306,14 @@ def _hook(phase: str, agent: str) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     """Run the lrdmem CLI and return the process exit code."""
+    try:
+        return _main(argv)
+    except (config.ConfigError, StoreNotConfigured) as e:
+        print(printable(f"lrdmem: {e}"), file=sys.stderr)
+        return 1
+
+
+def _main(argv: list[str] | None) -> int:
     parser = argparse.ArgumentParser(prog="lrdmem", description="Shared memory store for AI coding agents.")
     parser.add_argument("--version", action="version", version=f"lrdmem {__version__}")
     sub = parser.add_subparsers(dest="command")
@@ -324,6 +354,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--kind", choices=["obligation", "pattern", "fact"])
     p.add_argument("--description")
     p.add_argument("--body")
+    p.add_argument("--why", help="new memory: why the rule exists")
+    p.add_argument("--how", help="new memory: how to apply it")
+    for name in ("paths", "commands", "repos"):
+        p.add_argument(f"--{name}", action="append", help=f"new memory: triggers.{name} (repeat or comma-separate)")
     p.add_argument("--env")
     p.add_argument("--new", action="store_true")
     p = sub.add_parser("learn-pr", help="link a GitHub PR's review comments to the memories they reinforce")
@@ -362,8 +396,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--agent", choices=AGENTS, required=True)
     p.add_argument("--dry-run", action="store_true", help="print the planned changes and write nothing")
     args = parser.parse_args(argv)
-    if args.command in ("hook", "context"):
-        return _hook(getattr(args, "phase", "session-start"), args.agent)
+    if args.command == "hook":
+        return _hook(args.phase, args.agent)
+    if args.command == "context":
+        return _context(args.agent)
     if args.command == "config":
         return _config(args)
     if args.command == "install":

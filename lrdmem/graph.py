@@ -33,6 +33,10 @@ class Graph:
                 for other in keys:
                     self._link(k, other)
 
+    def memories(self) -> list[Memory]:
+        """Every memory node of the graph."""
+        return list(self._nodes.values())
+
     def _target(self, env: str | None, slug: str) -> _Key | None:
         """Resolve a slug seen from env: its own env first, then _global."""
         for key in ((env, slug), (None, slug)):
