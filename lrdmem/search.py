@@ -64,10 +64,18 @@ def bm25(docs: list[tuple[str, str]], query: str, k1: float = 1.2, b: float = 0.
     return sorted(out, key=lambda r: (-r[1], r[0]))
 
 
+def visible(node, env: str | None, repo: str | None) -> bool:
+    """True when a node (memory, experience, edge...) is seen from repo `repo` of `env`: it lives in _global,
+    <env>/_global or <env>/<repo>, and a memory's triggers.repos list, when present, names the repo. env/repo None
+    (not opted in) sees only _global."""
+    if node.env not in (None, env) or node.repo not in (None, repo):
+        return False
+    return not isinstance(node, Memory) or repo in (strs(node.triggers.get("repos")) or [repo])
+
+
 def _visible(store: Store, env: str, repo: str) -> list[Memory]:
-    """Memories of _global, <env>/_global and <env>/<repo>; a triggers.repos list must name the repo."""
-    return [m for m in store.memories()
-            if m.env in (None, env) and m.repo in (None, repo) and repo in (strs(m.triggers.get("repos")) or [repo])]
+    """Memories visible from the repo (see `visible`)."""
+    return [m for m in store.memories() if visible(m, env, repo)]
 
 
 def _text(m: Memory) -> str:

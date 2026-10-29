@@ -147,7 +147,7 @@ def unique(path_stem: Path) -> Path:
 def index_line(folder: Path, line: str) -> None:
     """Append line to folder/MEMORY.md unless already present, under an exclusive lock."""
     guard(line)
-    if "\n" in line or "\r" in line:
+    if len(line.splitlines()) > 1 or "\n" in line or "\r" in line:  # splitlines: also U+2028, \x85, \x0b...
         raise Refused("an index line must be a single line")
     fd = os.open(folder / "MEMORY.md", os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o644)
     with os.fdopen(fd, "a+", encoding="utf-8") as f:

@@ -88,6 +88,16 @@ class LearnTest(unittest.TestCase):
         self.assertFalse((self.root / "acme/web/spaces.md").exists())
         self.assertFalse((self.root / "acme/web/experiences").exists())
 
+    def test_ordinary_refusal_leaves_nothing_and_blank_triggers_dropped(self):
+        for bad in (dict(NEW, description="d" * 301), dict(NEW, description="a\u2028b"),
+                    dict(NEW, paths=["p" * 201])):
+            with self.assertRaises(LearnRefused):
+                self.learn(memory="spaces", **bad)
+        self.assertFalse((self.root / "acme/web/experiences").exists())
+        self.assertFalse((self.root / "acme/web/spaces.md").exists())
+        r = self.learn(memory="spaces", **dict(NEW, paths=["", "*.py"], commands=["  "]))
+        self.assertEqual(parse(r.memory.read_text())["triggers"], {"paths": ["*.py"]})
+
     def test_env_must_be_a_known_environment(self):
         for bad in ("..", str(self.tmp), "nope"):
             with self.subTest(bad), self.assertRaises(LearnRefused):

@@ -250,7 +250,7 @@ def _propose(store: Store, g: Graph, args) -> int:
             raise propose.write.Refused("could not read stdin as UTF-8 text") from None
         try:
             payload = json.loads(piped)
-        except ValueError:
+        except (ValueError, RecursionError):
             raise propose.write.Refused("expected a JSON payload on stdin") from None
         r = propose.apply(store, Path.cwd(), payload, agent=args.agent, device=config.load()["device"], env=args.env)
     except (propose.write.Refused, StoreFormatError, OSError) as e:
@@ -259,9 +259,11 @@ def _propose(store: Store, g: Graph, args) -> int:
     for label, refs in (("created", r.created), ("evidence", r.evidence_added), ("edge", r.edges)):
         for ref in refs:
             _out(f"{label} {ref}")
+    for ref in r.edges_reused:
+        _out(f"edge {ref} (existing)")
     for i, reason in r.refused:
         _out(f"refused {i}: {reason}")
-    return 1 if not (r.created or r.evidence_added or r.edges) and r.refused else 0
+    return 1 if not (r.created or r.evidence_added or r.edges or r.edges_reused) and r.refused else 0
 
 
 def _learn_pr(store: Store, g: Graph, args) -> int:

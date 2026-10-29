@@ -46,7 +46,7 @@ def add(store: Store, cwd: Path, *, kind: str, agent: str, text: str, scope: str
     files = list(files)
     scalars = {"agent": agent, "device": device, "ref": ref or "", "request_id": request_id or "",
                **{f"files[{i}]": f for i, f in enumerate(files)}}
-    if any("\n" in v or "\r" in v for v in scalars.values()):
+    if any(len(v.splitlines()) > 1 or "\n" in v or "\r" in v for v in scalars.values()):
         raise Refused("agent, device, ref, request_id and files must be single-line")
     if any(ord(c) < 32 or ord(c) == 127 for f in files for c in f):
         raise Refused("files must not contain control characters")

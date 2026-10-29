@@ -72,6 +72,22 @@ def confidence(store: Store, items: list[Evidence]) -> float:
     return _clamp(1 - math.exp(-(sum(pos.values()) - sum(neg.values()))))
 
 
+def memory_evidence(store: Store, memory) -> list[Evidence]:
+    """A memory's evidence list plus, as `supports` weight 1.0, each v0.1 context naming it in `memories:`.
+
+    A context names the memory when it lives in the memory's env, or the memory is `_global` and the context's env has
+    no memory with that slug (v0.1 slug resolution: own env first, then _global).
+    """
+    items = list(memory.evidence)
+    have = {e.ref for e in items}
+    own = {(m.env, m.slug) for m in store.memories()}
+    for c in store.contexts():
+        if memory.slug in c.memories and c.ref not in have and (
+                c.env == memory.env or (memory.env is None and (c.env, memory.slug) not in own)):
+            items.append(Evidence(c.ref, "supports", 1.0))
+    return items
+
+
 def has_outcome(store: Store, items: list[Evidence]) -> bool:
     """True when a `supports` item references an experience of kind `outcome` or `check`."""
     for ev in items:

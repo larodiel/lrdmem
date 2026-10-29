@@ -13,7 +13,7 @@ from lrdmem import write
 from lrdmem.frontmatter import parse
 from lrdmem.lint import KINDS, SOURCES, has_secret
 from lrdmem.model import v01_memory_type
-from lrdmem.store import AmbiguousRepo, Store, StoreFormatError, resolve
+from lrdmem.store import AmbiguousRepo, Experience, Store, StoreFormatError, resolve
 
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 _LINK = re.compile(r"\[\[([^\]]+)\]\]")
@@ -119,7 +119,7 @@ def learn(store: Store, cwd: Path, *, memory: str, mistake: str, correction: str
                **{f"files[{i}]": f for i, f in enumerate(files)},
                **{f"{name}[{i}]": v for name, vals in (("paths", paths), ("commands", commands), ("repos", repos))
                   for i, v in enumerate(vals)}}
-    if any("\n" in v or "\r" in v for v in oneline.values()):
+    if any(len(v.splitlines()) > 1 or "\n" in v or "\r" in v for v in oneline.values()):
         raise LearnRefused("agent, device, pr, description, files and triggers must be single-line")
     folder, vis_env = scope_folder(store, cwd, scope, env)
     path = folder / f"{memory}.md"
@@ -144,18 +144,27 @@ def learn(store: Store, cwd: Path, *, memory: str, mistake: str, correction: str
 
     from lrdmem import experience, propose  # both build on this module
 
+    if exists:
+        cand = {"classification": "equivalent", "relates_to": path.relative_to(store.root).with_suffix("").as_posix()}
+    else:
+        triggers = {k: kept for k, v in (("paths", paths), ("commands", commands), ("repos", repos))
+                    if (kept := [x for x in v if x.strip()])}  # v0.1 accepted blank entries; they mean nothing
+        cand = {"slug": memory, "memory_type": v01_memory_type(kind or ""), "description": description,
+                "body": body, "why": why, "how": how, "scope": scope, "classification": "new",
+                **({"triggers": triggers} if triggers else {})}
+    exp_kind = "review" if source == "pr" else "correction"
+    pending = Experience("pending", folder / "experiences" / "pending.md", *store.scope_of(folder), {"kind": exp_kind})
+    try:  # every ordinary refusal happens here, before the experience is recorded
+        refused = propose.validate(store, cwd, {"candidates": [cand]}, agent=agent, env=env, experience=pending)
+    except write.Refused as e:
+        raise LearnRefused(str(e)) from None
+    if refused:
+        raise LearnRefused(refused[0][1])
+
     try:  # the write layer re-checks secrets, scope and symlinks; a late refusal is still a LearnRefused
-        exp, _ = experience.add(store, cwd, kind="review" if source == "pr" else "correction", agent=agent,
+        exp, _ = experience.add(store, cwd, kind=exp_kind, agent=agent,
                                 text=f"**Mistake:** {mistake.strip()}\n\n**Correction:** {correction.strip()}",
                                 scope=scope, files=files, source=source, ref=pr, device=device, env=env)
-        if exists:
-            cand = {"classification": "equivalent",
-                    "relates_to": path.relative_to(store.root).with_suffix("").as_posix()}
-        else:
-            triggers = {k: list(v) for k, v in (("paths", paths), ("commands", commands), ("repos", repos)) if v}
-            cand = {"slug": memory, "memory_type": v01_memory_type(kind or ""), "description": description,
-                    "body": body, "why": why, "how": how, "scope": scope, "classification": "new",
-                    **({"triggers": triggers} if triggers else {})}
         r = propose.apply(store, cwd, {"experience": exp.ref, "candidates": [cand]}, agent=agent, device=device,
                           env=env)
         if r.refused:

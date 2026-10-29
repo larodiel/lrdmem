@@ -34,6 +34,19 @@ class EvidenceTest(unittest.TestCase):
     def ev(self, name, kind="supports", w=1.0):
         return Evidence(f"{S}{name}", kind, w)
 
+    def test_legacy_contexts_support_their_memory(self):
+        ctx = "---\nid: {0}\ndate: 2026-01-0{1}\nagent: a{1}\nsource: chat\nmemories: [{2}]\n---\n\nx\n"
+        st = self.build(mem("m", type="feedback"), mem("other", type="feedback"), ("_global/m.md", mem("m")[1]),
+                        ("acme/web/contexts/c1.md", ctx.format("c1", 1, "m")),
+                        ("acme/web/contexts/c2.md", ctx.format("c2", 2, "m")),
+                        ("acme/web/contexts/c3.md", ctx.format("c3", 3, "other")))
+        m = st.node("acme/web/m")
+        items = evidence.memory_evidence(st, m)
+        self.assertEqual(sorted((e.ref, e.kind, e.weight) for e in items),
+                         [("acme/web/contexts/c1", "supports", 1.0), ("acme/web/contexts/c2", "supports", 1.0)])
+        self.assertEqual(evidence.memory_evidence(st, st.node("_global/m")), [])  # shadowed by acme/web/m
+        self.assertAlmostEqual(evidence.confidence(st, items), 1 - 2.718281828459045 ** -2, places=6)
+
     def test_no_evidence_zero(self):
         self.assertEqual(evidence.confidence(self.build(), []), 0.0)
 

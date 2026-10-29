@@ -113,20 +113,35 @@ class ProposeTest(_Base):
         self.assertEqual((again.evidence_added, again.refused), ([], []))  # same evidence twice: no-op
         self.assertEqual(len(self.mem("spaces").evidence), 1)
 
-    def test_contradicts_marks_the_weaker_side_contested(self):
+    def test_candidate_never_contests_an_active_memory(self):
         self.put("strong", "Strong rule")
-        refs = [self.exp(kind="correction", text=f"proof {i}", agent=f"a{i}").ref for i in range(2)]
-        for ref in refs:
-            write.add_evidence(self.root / "acme/web/strong.md", evidence.Evidence(ref, "supports", 1.0))
         e = self.exp(kind="discovery", text="maybe the opposite")
+        r = self.apply(e, cand("weak", classification="contradicts", relates_to="acme/web/strong"),
+                       cand("guess", "hypothesis", classification="contradicts", relates_to="acme/web/strong"))
+        self.assertEqual(r.refused, [])
+        self.assertEqual([self.mem(s).state for s in ("weak", "guess", "strong")], ["candidate", "candidate", "active"])
+        self.assertEqual({(x.source, x.target, x.type, x.state) for x in self.store.edges()},
+                         {(f"acme/web/{s}", "acme/web/strong", "contradicts", "proposed") for s in ("weak", "guess")})
+        self.assertEqual([v.action for v in self.store.revisions() if v.action == "state_change"], [])
+        self.assertEqual(lint(self.store), [])
+
+    def test_correction_weaker_than_legacy_contexts_is_contested(self):
+        self.put("strong", "Strong rule")
+        ctx = self.root / "acme/web/contexts"
+        ctx.mkdir()
+        for i in range(2):
+            (ctx / f"2026-01-0{i + 1}-strong.md").write_text(
+                f"---\nid: 2026-01-0{i + 1}-strong\ndate: 2026-01-0{i + 1}\nagent: a{i}\nsource: chat\n"
+                "memories: [strong]\n---\n\nx\n")
+        e = self.exp(kind="correction", text="no, the opposite")
         r = self.apply(e, cand("weak", classification="contradicts", relates_to="acme/web/strong"))
         self.assertEqual(r.refused, [])
         self.assertEqual((self.mem("weak").state, self.mem("strong").state), ("contested", "active"))
-        [edge] = [x for x in self.store.edges() if x.type == "contradicts"]
-        self.assertEqual((edge.source, edge.target, edge.state), ("acme/web/weak", "acme/web/strong", "proposed"))
         revs = [v for v in self.store.revisions() if v.target == "acme/web/weak"]
-        self.assertEqual([(v.action, v.before, v.after) for v in revs],
-                         [("state_change", {"state": "candidate"}, {"state": "contested"})])
+        self.assertEqual(sorted((v.action, v.before, v.after, v.data.get("prev", "")) for v in revs),
+                         [("create", {}, {"memory_type": "semantic", "state": "active"}, ""),
+                          ("state_change", {"state": "active"}, {"state": "contested"},
+                           next(v.id for v in revs if v.action == "create"))])
         self.assertEqual(lint(self.store), [])
 
     def test_contradicts_existing_weaker_and_tie(self):
@@ -146,8 +161,10 @@ class ProposeTest(_Base):
         self.put("base", "Base rule")
         e = self.exp(kind="discovery", text="related idea")
         r = self.apply(e, cand("near", classification="complementary", relates_to="acme/web/base"),
-                       cand("wide", classification="complementary", relates_to="acme/web/base", edge_type="generalizes"))
-        self.assertEqual(r.refused, [])
+                       cand("wide", classification="complementary", relates_to="acme/web/base", edge_type="generalizes"),
+                       cand("bad1", classification="complementary", relates_to="acme/web/base", edge_type="supersedes"),
+                       cand("bad2", classification="new", relates_to="acme/web/base", edge_type="caused_by"))
+        self.assertEqual([i for i, _ in r.refused], [2, 3])
         got = {(x.source, x.type, x.state) for x in self.store.edges()}
         self.assertEqual(got, {("acme/web/near", "related_to", "proposed"), ("acme/web/wide", "generalizes", "proposed")})
 
@@ -188,7 +205,7 @@ class ProposeTest(_Base):
         self.assertEqual((r.created, r.edges, r.evidence_added), ([], [], []))
         self.assertEqual(self.snapshot(), snap)
         why = ["JSON object", "unknown keys", "memory_type", "classification", "hypothesis cannot merge", "missing why",
-               "missing how", "credential", "slug must", "slug must", "outside the candidate", "not a memory",
+               "missing how", "credential", "slug must", "slug must", "not visible", "not a memory",
                "required for complementary", "required for equivalent", "triggers", "triggers", "_global/shadow.md",
                "classify it as equivalent", "single-line", "scope must", "edge_type", "home directory",
                "[[nowhere]]", "always contradicts", "must be strings"]
@@ -231,6 +248,77 @@ class ProposeTest(_Base):
                          [("acme/web/first", "acme/web/ep", "derived_from")])
 
 
+class FixRound1Test(_Base):
+    def setUp(self):
+        super().setUp()
+        (self.root / "acme/api").mkdir()
+        (self.root / "acme/api/MEMORY.md").write_text("- [api-rule](api-rule.md) — x\n")
+        (self.root / "acme/api/api-rule.md").write_text(MEM.format("api-rule", "x"))
+        self.api = self.tmp / "api"
+        self.api.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=self.api, check=True)
+
+    def test_other_repo_memory_and_experience_refused(self):
+        e = self.exp(kind="correction", text="x")
+        ea = experience.add(self.store, self.api, kind="correction", agent="claude", text="api fix")[0]
+        snap = self.snapshot()
+        r = self.apply(e, {"classification": "equivalent", "relates_to": "acme/api/api-rule"},
+                       cand("w1", classification="contradicts", relates_to="acme/api/api-rule"),
+                       cand("w2", classification="complementary", relates_to="acme/api/api-rule"))
+        self.assertEqual([i for i, _ in r.refused], [0, 1, 2])
+        self.assertTrue(all("not visible" in why for _, why in r.refused), r.refused)
+        r = self.apply(ea, cand("w3"))
+        self.assertEqual(([i for i, _ in r.refused], r.created), ([0], []))
+        self.assertIn("not visible", r.refused[0][1])
+        self.assertEqual(self.snapshot(), snap)
+        self.assertEqual(self.store.node("acme/api/api-rule").state, "active")
+
+    def test_rollback_only_removes_what_this_call_wrote(self):
+        self.put("old", "Old rule")
+        e = self.exp(kind="correction", text="x")
+        first = self.apply(e, cand("ghost", classification="complementary", relates_to="acme/web/old"))
+        self.assertEqual(first.refused, [])
+        (self.root / "acme/web/ghost.md").unlink()  # removed by hand; its edge and revisions stay
+        before = self.snapshot()
+        with mock.patch.object(write, "index_line", side_effect=OSError("disk full")):
+            r = self.apply(e, cand("ghost", classification="complementary", relates_to="acme/web/old"))
+        self.assertEqual([i for i, _ in r.refused], [0])
+        self.assertEqual(sorted(self.snapshot()), sorted(before))
+        again = self.apply(e, cand("ghost", classification="complementary", relates_to="acme/web/old"))
+        self.assertEqual((again.created, again.edges, again.edges_reused), (["acme/web/ghost"], [], first.edges))
+
+    def test_unicode_line_separators_refused(self):
+        e = self.exp(kind="correction", text="x")
+        snap = self.snapshot()
+        for sep in ("\u2028", "\u2029", "\x85", "\x0b", "\x1c", "\x1d", "\x1e"):
+            r = self.apply(e, cand("u1", description=f"d{sep}state: active"),
+                           cand("u2", triggers={"paths": [f"a{sep}b"]}))
+            self.assertEqual([i for i, _ in r.refused], [0, 1], repr(sep))
+        self.assertEqual(self.snapshot(), snap)
+
+    def test_size_caps(self):
+        e = self.exp(kind="correction", text="x")
+        r = self.apply(e, cand("c1", description="d" * 301), cand("c2", body="b" * 20_001),
+                       cand("c3", why="w" * 2001), cand("c4", how="h" * 2001),
+                       cand("c5", triggers={"paths": ["p" * 201]}),
+                       cand("c6", triggers={"paths": [f"p{i}" for i in range(51)]}),
+                       cand("ok", description="d" * 300, body="b" * 20_000, why="w" * 2000,
+                            triggers={"paths": [f"p{i}" for i in range(50)]}))
+        self.assertEqual(([i for i, _ in r.refused], r.created), ([0, 1, 2, 3, 4, 5], ["acme/web/ok"]))
+        self.assertTrue(all("too long" in why or "too many" in why for _, why in r.refused), r.refused)
+
+    def test_create_revision_and_validate_writes_nothing(self):
+        e = self.exp()
+        snap = self.snapshot()
+        refused = propose.validate(self.store, self.repo, {"experience": e.ref, "candidates": [cand("v1"), cand("V")]},
+                                   agent="claude")
+        self.assertEqual([i for i, _ in refused], [1])
+        self.assertEqual(self.snapshot(), snap)
+        self.apply(e, cand("v1"))
+        self.assertEqual([(v.action, v.before, v.after) for v in self.store.revisions() if v.target == "acme/web/v1"],
+                         [("create", {}, {"memory_type": "semantic", "state": "candidate"})])
+
+
 class ProposeCliTest(_Base):
     def run_cli(self, stdin, *argv):
         out, err = io.StringIO(), io.StringIO()
@@ -252,9 +340,10 @@ class ProposeCliTest(_Base):
                                  "'hypothesis', 'prospective', 'metacognitive']")
         code, out, _ = self.run_cli(json.dumps({"experience": e.ref, "candidates": [cand("bad", "belief")]}))
         self.assertEqual(code, 1)
-        code, _, err = self.run_cli("not json")
-        self.assertEqual(code, 1)
-        self.assertIn("JSON", err)
+        for bad in ("not json", "[" * 200_000):
+            code, _, err = self.run_cli(bad)
+            self.assertEqual(code, 1)
+            self.assertIn("JSON", err)
         code, out, _ = self.run_cli(json.dumps({"experience": e.ref, "candidates": [
             cand("ok"), cand("ep2", "episodic", why=None, how=None)]}))
         self.assertEqual((code, out[:2]), (0, ["created acme/web/ep2", "created acme/web/ok"]))

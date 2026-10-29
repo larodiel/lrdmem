@@ -213,6 +213,10 @@ class WriteTest(unittest.TestCase):
         self.assertEqual((self.folder / "MEMORY.md").read_text(), "- [m](m.md) — d\n")
         with self.assertRaises(write.Refused):
             write.index_line(self.folder, "a\nb")
+        for sep in ("\r", "\u2028", "\u2029", "\x85", "\x0b", "\x1c"):
+            with self.assertRaises(write.Refused):
+                write.index_line(self.folder, f"- [n](n.md) — a{sep}b")
+        self.assertEqual((self.folder / "MEMORY.md").read_text(), "- [m](m.md) — d\n")
 
     # central secret guard
 
