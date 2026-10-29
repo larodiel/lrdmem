@@ -287,13 +287,57 @@ class SyncTest(unittest.TestCase):
         lint(store, git_checks=True)
         self.assertFalse(marker.exists())
 
+    def plant_filter_repo(self, folder: Path, marker: Path, as_file: bool):
+        """A non-bare repo (or a .git file to an outside gitdir) whose required clean filter touches marker."""
+        gitdir_holder = folder if not as_file else self.tmp / "evil"
+        gitdir_holder.mkdir(parents=True, exist_ok=True)
+        g(gitdir_holder, "init", "-q")
+        with (gitdir_holder / ".git" / "config").open("a") as f:
+            f.write(f"[filter \"x\"]\n\tclean = sh -c 'touch {marker}; cat'\n\trequired = true\n")
+        write(folder / ".gitattributes", "* filter=x\n")
+        write(folder / "q.md", "---\nid: q\n---\n")
+        if as_file:
+            (folder / ".git").write_text(f"gitdir: {gitdir_holder}/.git\n")
+
+    def test_nested_repo_with_filter_driver_is_refused(self):
+        for as_file in (False, True):
+            with self.subTest(as_file=as_file):
+                store = self.clone(f"n{as_file}")
+                marker = self.tmp / f"pwned{as_file}"
+                self.plant_filter_repo(store.root / "work/app/queue", marker, as_file)
+                for _ in range(2):
+                    (res,) = sync(store, "work")
+                    self.assertIn("nested git repository inside the store", res.error)
+                    self.assertIn("work/app/queue", res.error)
+                self.assertEqual(g(store.root / "work", "diff", "--cached", "--name-only"), "")
+                self.assertFalse(marker.exists())
+                self.assertIsNone(pull(store, "work"))
+                self.assertFalse(marker.exists())
+
+    def test_gitlink_staged_by_other_means_is_unstaged(self):
+        store = self.clone("g")
+        work = store.root / "work"
+        write(work / "ok.md", "x")
+        from lrdmem import sync as sync_mod
+        real = sync_mod._git
+        def plant(repo, *args, **kw):  # a repo appears between the scan and `git add`
+            out = real(repo, *args, **kw)
+            if args[:1] == ("add",):
+                real(repo, "update-index", "--add", "--cacheinfo", "160000", "a" * 40, "sub")
+            return out
+        with mock.patch("lrdmem.sync._git", plant):
+            (res,) = sync(store, "work")
+        self.assertIn("nested git repository", res.error)
+        self.assertNotIn("sub", g(work, "diff", "--cached", "--name-only"))
+
     def test_git_calls_are_hardened(self):
         from lrdmem import sync as sync_mod
         with mock.patch("subprocess.run") as run:
             run.return_value = mock.Mock(returncode=0, stdout="x", stderr="")
             sync_mod._git(self.tmp, "status")
         argv = run.call_args_list[-1].args[0]
-        for opt in ("safe.bareRepository=explicit", "core.fsmonitor=false", "core.hooksPath=/dev/null"):
+        for opt in ("diff.ignoreSubmodules=all", "status.submoduleSummary=false", "submodule.recurse=false",
+                    "safe.bareRepository=explicit", "core.fsmonitor=false", "core.hooksPath=/dev/null"):
             self.assertIn(opt, argv)
         env = run.call_args_list[-1].kwargs["env"]
         self.assertEqual(env["GIT_CEILING_DIRECTORIES"], str(self.tmp.parent))

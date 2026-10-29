@@ -295,6 +295,10 @@ class LintFixRound1Test(unittest.TestCase):
     def test_secret_in_file_without_frontmatter(self):
         self.has(v2files(**{"work/app/queue/q.md": "ghp_" + "a" * 36 + "\n"}), "looks like it holds a credential")
 
+    def test_nested_git_repository_is_a_problem(self):
+        self.has(v2files(**{"work/app/queue/.git/HEAD": "ref: refs/heads/main\n"}), "nested git repository")
+        self.has(v2files(**{"work/app/queue/.git": "gitdir: /elsewhere\n"}), "nested git repository")
+
     def test_bad_markers(self):
         for bad in ("0", "-1", "2_0", "+2", " ", "x"):
             self.has(v2files(**{".lrdmem-format": bad}), ".lrdmem-format")
@@ -341,7 +345,8 @@ class LintGitTest(unittest.TestCase):
                 self.git(planted, "commit", "-qm", "x")
                 self.git(planted, "config", "core.fsmonitor", f"touch {marker}")
                 (planted / ".git").rename(exp_dir / ".git")
-                self.assertEqual(lint(Store(root), git_checks=True), [])
+                self.assertEqual(lint(Store(root), git_checks=True),
+                                 ["work/app/experiences/.git: nested git repository inside the store; remove it"])
             self.assertFalse(marker.exists())
 
     def test_untracked_or_outside_git_is_skipped(self):

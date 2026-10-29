@@ -28,7 +28,8 @@ class _GitError(Exception):
     pass
 
 
-_HARDEN = ["-c", "safe.bareRepository=explicit", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null"]
+_HARDEN = ["-c", "safe.bareRepository=explicit", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null",
+           "-c", "diff.ignoreSubmodules=all", "-c", "status.submoduleSummary=false", "-c", "submodule.recurse=false"]
 _AUTO = object()
 
 
@@ -65,6 +66,23 @@ def _git(repo: Path, *args: str, timeout: float = 30, ceiling=_AUTO, binary: boo
         err = r.stderr.decode(errors="replace") if binary else r.stderr
         raise _GitError(err.strip() or f"git {args[0]} failed")
     return r.stdout if binary else r.stdout.strip()
+
+
+def nested_git(base: Path, own: Path | None = None, prune: tuple = ()) -> list[Path]:
+    """Every `.git` (dir or file) under base other than own, not descending into symlinks or the prune dirs.
+
+    A nested repository in store content can carry config and attributes that run commands when the outer
+    repo stages or inspects it, so such content is refused rather than synced.
+    """
+    found = []
+    for cur, dirs, files in os.walk(base):
+        cur = Path(cur)
+        dirs[:] = [d for d in dirs if cur / d not in prune and (cur / d).resolve() != own]
+        for name in (*dirs, *files):
+            if name == ".git" and cur / name != own:
+                found.append(cur / name)
+        dirs[:] = [d for d in dirs if d != ".git"]
+    return found
 
 
 def toplevel(path: Path, ceiling: Path | None = None) -> Path | None:
@@ -143,8 +161,12 @@ def _pull(repo: Path, label: str, timeout: float | None = None) -> str | None:
     return None
 
 
+def _nested_msg(path: Path) -> str:
+    return f"nested git repository inside the store: {path}; remove it"
+
+
 def _sync_one(label: str, repo: Path, include: str, excludes: list[str], message: str,
-              skip_idle: bool = False) -> SyncResult:
+              skip_idle: bool = False, own_repos: list[str] = ()) -> SyncResult:
     spec = ["--", f":(literal){include}" if include != "." else ".",
             *(f":(exclude,literal){e}" for e in excludes)]
     committed = pushed = False
@@ -153,8 +175,16 @@ def _sync_one(label: str, repo: Path, include: str, excludes: list[str], message
             return SyncResult(label, False, False, f"rebase in progress in {label}")
         if _git(repo, "ls-files", "-u"):
             return SyncResult(label, False, False, f"unmerged paths in {label}; resolve them first")
-        if _git(repo, "status", "--porcelain", *spec):
+        found = nested_git(repo / include, repo / ".git", tuple(repo / e for e in [*excludes, *own_repos]))
+        if found:
+            return SyncResult(label, False, False, _nested_msg(found[0]))
+        if _git(repo, "status", "--porcelain", "--ignore-submodules=all", *spec):
             _git(repo, "add", "-A", *spec)
+            links = [line.split("\t", 1)[1] for line in _git(repo, "ls-files", "-s", "-z", *spec).split("\0")
+                     if line.startswith("160000")]
+            if links:
+                _git(repo, "reset", "-q", "--", *(f":(literal){x}" for x in links))
+                return SyncResult(label, False, False, _nested_msg(repo / links[0]))
             _git(repo, "commit", "-m", message)
             committed = True
         remotes = _git(repo, "remote").split()
@@ -162,7 +192,7 @@ def _sync_one(label: str, repo: Path, include: str, excludes: list[str], message
                 and _git(repo, "rev-list", "--count", "@{u}..HEAD") == "0":
             return SyncResult(label, False, False, None)  # nothing to push: spare the network
         if remotes:
-            if _git(repo, "status", "--porcelain", "--untracked-files=no"):
+            if _git(repo, "status", "--porcelain", "--ignore-submodules=all", "--untracked-files=no"):
                 done = f"committed {label}; " if committed else ""
                 return SyncResult(label, committed, False,
                                   f"{done}not pulled/pushed: uncommitted changes outside {label}")
@@ -197,7 +227,9 @@ def sync(store: Store, env: str | None = None, message: str | None = None,
         include = path.resolve().relative_to(top).as_posix()
         excludes = [n for n in store.environments() if include == "." and top == store.root.resolve()
                     and toplevel(store.root / n, store.root.parent) != top and not _ignored(top, n)]
-        results.append(_sync_one(label, top, include, excludes, message, skip_idle))
+        own = [n for n in store.environments() if include == "." and top == store.root.resolve()
+               and toplevel(store.root / n, store.root.parent) != top]  # env repos, ignored ones too
+        results.append(_sync_one(label, top, include, excludes, message, skip_idle, own))
     return results
 
 
@@ -217,7 +249,7 @@ def pull(store: Store, env: str | None = None, budget: float | None = None) -> s
             continue
         try:
             if _git(top, "remote"):
-                if not _rebasing(top) and _git(top, "status", "--porcelain", "--untracked-files=no"):
+                if not _rebasing(top) and _git(top, "status", "--porcelain", "--ignore-submodules=all", "--untracked-files=no"):
                     errors.append(f"skipped: uncommitted changes in {label}")
                     continue
                 err = _pull(top, label, timeout)
