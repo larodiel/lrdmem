@@ -114,12 +114,7 @@ def learn(store: Store, cwd: Path, *, memory: str, mistake: str, correction: str
     if any("\n" in v or "\r" in v for v in oneline.values()):
         raise LearnRefused("agent, device, pr, description, files and triggers must be single-line")
     folder, vis_env = _folder(store, cwd, scope, env)
-    try:
-        path = write.target(store, folder, f"{memory}.md")
-        write.target(store, folder, "contexts")
-        write.target(store, folder, "MEMORY.md")
-    except (write.Refused, StoreFormatError) as e:
-        raise LearnRefused(str(e)) from None
+    path = folder / f"{memory}.md"
     exists = path.exists()
     if not exists and not all(v and v.strip() for v in (description, body, why, how)):
         raise LearnRefused(f"memory '{memory}' does not exist in this scope; description, body, why and how "
@@ -133,6 +128,11 @@ def learn(store: Store, cwd: Path, *, memory: str, mistake: str, correction: str
     dups = [] if exists else _duplicates(store, vis_env, memory, description)
     if dups and not new:
         raise LearnRefused("similar memories exist (use --new to override): " + ", ".join(dups), dups)
+    try:  # after the text checks: a refused learn leaves no trace, not even the format marker
+        for rel in (f"{memory}.md", "contexts", "MEMORY.md"):
+            write.target(store, folder, rel)
+    except (write.Refused, StoreFormatError) as e:
+        raise LearnRefused(str(e)) from None
 
     try:  # the write layer re-checks secrets, scope and symlinks; a late refusal is still a LearnRefused
         today = date.today().isoformat()

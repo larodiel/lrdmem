@@ -35,9 +35,26 @@ def printable(text: str) -> str:
     return "".join("?" if ord(c) < 0x20 or 0x7F <= ord(c) <= 0x9F else c for c in text)
 
 
+def _strings(value):
+    if isinstance(value, dict):
+        value = list(value.values())
+    if isinstance(value, list):
+        for v in value:
+            yield from _strings(v)
+    elif isinstance(value, str):
+        yield value
+
+
 def has_secret(text: str) -> bool:
-    """True when text looks like it holds a credential."""
-    return bool(SECRET.search(text))
+    """True when text, or any decoded frontmatter value in it (quoted values may hide escaped newlines/tabs),
+    looks like it holds a credential."""
+    if SECRET.search(text):
+        return True
+    try:
+        data = split(text)[0]
+    except ValueError:
+        return False
+    return any(SECRET.search(v) for v in _strings(data))
 
 
 def _is_date(value) -> bool:

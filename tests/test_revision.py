@@ -114,5 +114,95 @@ class RevisionTest(unittest.TestCase):
         self.assertIn("changed", err.getvalue())
 
 
+
+class RevisionFixRound1Test(unittest.TestCase):
+    setUp = RevisionTest.setUp
+    record = RevisionTest.record
+
+    def promote(self, state="active", old="candidate"):
+        write.set_fields(self.mem, {"state": state})
+        return self.record(before={"state": old}, after={"state": state})
+
+    def test_escaped_secrets_refused(self):
+        pw = "pass" + "word\n=hunter22xyz"
+        for kw in ({"before": {"description": pw}}, {"after": {"description": pw}}, {"reason": pw}):
+            with self.subTest(kw), self.assertRaises(write.Refused):
+                self.record(**kw)
+        self.assertFalse(list((self.folder / "revisions").glob("*.md")))
+
+    def test_repeated_same_day_changes_each_recorded(self):
+        r1 = self.promote()
+        a = revision.revert(self.store, r1.stem, "h")
+        r2 = self.promote()
+        b = revision.revert(self.store, r2.stem, "h")
+        self.assertEqual(len({r1, a, r2, b}), 4)
+        self.assertEqual(len(list((self.folder / "revisions").glob("*.md"))), 4)
+        self.assertIn("  state: candidate\n", self.mem.read_text())
+        self.assertEqual(self.record(before={"state": "active"}, after={"state": "candidate"},
+                                     action="revert", reason="again", by="x").name, b.name)  # same tip: no-op
+
+    def test_independent_stores_with_same_history_get_same_ids(self):
+        def history(root):
+            store = Store(root)
+            folder, mem = root / "acme/web", root / "acme/web/m.md"
+            ids = []
+            for old, new in (("candidate", "active"), ("active", "contested"), ("contested", "active")):
+                write.set_fields(mem, {"state": new})
+                ids.append(revision.record(store, folder, "acme/web/m", "state_change", {"state": old},
+                                           {"state": new}, "r", "c").name)
+            return ids
+        t = tempfile.TemporaryDirectory()
+        self.addCleanup(t.cleanup)
+        other = make_store(Path(t.name), {"_global/MEMORY.md": "", "acme/web/MEMORY.md": "", "acme/web/m.md": MEM})
+        self.assertEqual(history(self.root), history(other))
+
+    def test_revert_refuses_target_outside_revision_scope(self):
+        other = self.root / "beta/app"
+        other.mkdir(parents=True)
+        (other / "MEMORY.md").write_text("")
+        rev = self.promote()
+        planted = other / "revisions" / rev.name
+        planted.parent.mkdir()
+        rev.rename(planted)  # a revision in env beta that targets acme/web/m
+        with self.assertRaises(write.Refused):
+            revision.revert(self.store, rev.stem, "h")
+        self.assertIn("  state: active\n", self.mem.read_text())
+
+    def test_revert_restores_only_allowlisted_fields(self):
+        write.set_fields(self.mem, {"author": "evil"})
+        rev = self.record(action="content_change", before={"author": "me"}, after={"author": "evil"})
+        with self.assertRaises(write.Refused):
+            revision.revert(self.store, rev.stem, "h")
+        self.assertIn("  author: evil\n", self.mem.read_text())
+        write.set_fields(self.mem, {"description": "d2", "valid_until": "2027-01-01"})
+        rev = self.record(action="content_change", before={"description": "d", "valid_until": ""},
+                          after={"description": "d2", "valid_until": "2027-01-01"})
+        revision.revert(self.store, rev.stem, "h")
+        self.assertIn("\ndescription: d\n", self.mem.read_text())
+
+    def test_revert_validates_its_revision_before_editing(self):
+        rev = self.promote()
+        real = self.root / "elsewhere"
+        (self.folder / "revisions").rename(real)
+        (self.folder / "revisions").symlink_to(real)  # readable through the link, but the revert must not write there
+        with self.assertRaises(write.Refused):
+            revision.revert(self.store, rev.stem, "h")
+        self.assertIn("  state: active\n", self.mem.read_text())
+        self.assertEqual(len(list(real.iterdir())), 1)
+
+    def test_expect_closes_the_check_to_edit_race(self):
+        rev = self.promote()
+        real = write.set_fields
+
+        def racing(path, changes, expect=None):
+            real(path, {"state": "obsolete"})  # another writer lands between revert's check and its edit
+            return real(path, changes, expect=expect)
+
+        with mock.patch.object(write, "set_fields", racing), self.assertRaises(write.Refused):
+            revision.revert(self.store, rev.stem, "h")
+        self.assertIn("  state: obsolete\n", self.mem.read_text())
+        self.assertEqual(len(list((self.folder / "revisions").glob("*.md"))), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -54,6 +54,7 @@ def target(store: Store, scope_folder: Path, rel: str) -> Path:
         raise Refused("target folder is not a scope folder of the store")
     if not folder.resolve().is_relative_to((store.root / parts[0]).resolve()):
         raise Refused("target folder resolves outside its environment")
+    guard(rel)  # file names are store content too
     names = rel.split("/")
     if not rel or rel.startswith("/") or any(n in ("", ".", "..") for n in names):
         raise Refused(f"invalid path inside the scope folder: {rel!r}")
@@ -138,12 +139,19 @@ def _scan(lines: list[str]) -> tuple[int, dict, dict, int | None] | None:
     return end, top, meta, meta_end
 
 
-def _set(text: str, changes: dict[str, str], memory: bool) -> str | None:
+def _value(data: dict, key: str, memory: bool):
+    meta = data.get("metadata") if memory and isinstance(data.get("metadata"), dict) else {}
+    return meta[key] if key in meta else data.get(key, "")
+
+
+def _set(text: str, changes: dict[str, str], memory: bool, expect: dict[str, str]) -> str | None:
     data = split(text)[0]
     lines = text.split("\n")
     scan = _scan(lines) if data is not None else None
     if scan is None:
         return None
+    if any(_value(data, k, memory) != v for k, v in expect.items()):
+        raise Refused("the file changed since it was read; nothing was written")
     cr = "\r" if lines[0].endswith("\r") else ""
     for key, value in changes.items():
         end, top, meta, meta_end = _scan(lines)
@@ -164,19 +172,19 @@ def _set(text: str, changes: dict[str, str], memory: bool) -> str | None:
             lines.insert(end, out + cr)
     new = "\n".join(lines)
     data = split(new)[0] or {}
-    meta = data.get("metadata") if memory and isinstance(data.get("metadata"), dict) else {}
-    if any((meta[k] if k in meta else data.get(k)) != v for k, v in changes.items()):
+    if any(_value(data, k, memory) != v for k, v in changes.items()):
         return None  # the edit would not read back as written
     return new
 
 
-def set_fields(path: Path, changes: dict[str, str]) -> bool:
+def set_fields(path: Path, changes: dict[str, str], expect: dict[str, str] | None = None) -> bool:
     """Set scalar frontmatter fields line by line; never re-dumps, never touches other lines, keeps CRLF.
 
     An existing key is replaced in place (a memory's metadata key first, else top level); a missing key goes at the
     end of a memory's `metadata:` section (created when absent), or at the top level of an edge, experience or
     revision. False, writing nothing, when the header is unparseable, a key is invalid, or the key's line is a
-    section, list or block scalar. Refused on a secret or on `confidence`/`priority` (computed on read).
+    section, list or block scalar. Refused on a secret or on `confidence`/`priority` (computed on read), and when
+    `expect` is given and the current values (an absent field reads as "") differ, checked under the file lock.
     """
     changes = {k: str(v) for k, v in changes.items()}
     if any(k in _COMPUTED for k in changes):
@@ -186,7 +194,8 @@ def set_fields(path: Path, changes: dict[str, str]) -> bool:
     if not all(FIELD.match(k) for k in changes):
         return False
     memory = path.parent.name not in SUBFOLDERS
-    return _edit(path, lambda text: _set(text, changes, memory))
+    expect = {k: str(v) for k, v in (expect or {}).items()}
+    return _edit(path, lambda text: _set(text, changes, memory, expect))
 
 
 def _append(text: str, item: dict, rendered: str) -> str | None:
@@ -222,6 +231,7 @@ def add_evidence(path: Path, item: Evidence) -> bool:
     is not an inline list. Refused on a secret.
     """
     entry = item.to_dict()
+    guard("\n".join(entry.values()))
     rendered = dump({"e": [entry]}).split("\n")[1][len("e: ["):-1]
     guard(rendered)
     return _edit(path, lambda text: _append(text, entry, rendered))

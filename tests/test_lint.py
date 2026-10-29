@@ -289,6 +289,14 @@ class LintV2Test(unittest.TestCase):
                            ("work/app/queue/q.md", f"---\nid: q\n---\n{key}\n")):
             self.has(v2files(**{path: text}), "looks like it holds a credential")
 
+    def test_escaped_secret_in_frontmatter_value(self):
+        pw = "pass" + "word\\n=hunter22xyz"  # as dump writes it: a JSON-escaped newline
+        for path, text in ((EXP, _exp(note=f'"{pw}"')),
+                           ("work/app/revisions/r.md", f"---\nid: r\nafter:\n  x: \"{pw}\"\n---\n"),
+                           ("work/app/a.md", mem(extra=f"evidence: [{{ref: \"x:{pw}\", kind: supports, weight: 1}}]\n"))):
+            with self.subTest(path):
+                self.has(v2files(**{path: text}), "looks like it holds a credential")
+
     def test_marker_missing_warns_only_with_v2_data(self):
         files = v2files()
         del files[".lrdmem-format"]

@@ -180,5 +180,79 @@ class WriteTest(unittest.TestCase):
         self.assertEqual({p: p.read_bytes() for p in self.root.rglob("*") if p.is_file()}, before)
 
 
+
+PW = "pass" + "word\n=hunter22xyz"  # dump escapes the newline: the raw file text no longer matches SECRET
+BEARER = "\nAuthori" + "zation: Bearer\t" + "A1b2C3d4E5f6G7h8"
+
+
+class WriteFixRound1Test(unittest.TestCase):
+    setUp = WriteTest.setUp
+
+    def test_escaped_secrets_refused(self):
+        from lrdmem.frontmatter import dump
+        before = {p: p.read_bytes() for p in self.root.rglob("*") if p.is_file()}
+        for val in (PW, BEARER):
+            with self.subTest(repr(val)):
+                with self.assertRaises(write.Refused):
+                    write.create(self.folder / "c.md", dump({"id": "c", "summary": val}) + "\nbody\n")
+                with self.assertRaises(write.Refused):
+                    write.create(self.folder / "c.md", dump({"id": "c", "tags": [val, {"k": val}]}) + "\n")
+                with self.assertRaises(write.Refused):
+                    write.add_evidence(self.mem, Evidence("x:" + val, "supports", 1.0))
+                with self.assertRaises(write.Refused):
+                    write.set_fields(self.mem, {"description": val})
+        self.assertEqual({p: p.read_bytes() for p in self.root.rglob("*") if p.is_file()}, before)
+
+    def test_target_refuses_secret_filenames(self):
+        with self.assertRaises(write.Refused):
+            write.target(self.store, self.folder, "contexts/xoxb-" + "1234567890ab.md")
+
+    def test_set_fields_expect_checked_under_lock(self):
+        with self.assertRaises(write.Refused):
+            write.set_fields(self.mem, {"state": "obsolete"}, expect={"state": "active"})
+        self.assertEqual(self.mem.read_text(), MEM)
+        self.assertTrue(write.set_fields(self.mem, {"state": "obsolete"}, expect={"state": "candidate", "x": ""}))
+        self.assertIn("  state: obsolete\n", self.mem.read_text())
+
+    def test_only_write_py_writes_store_files(self):
+        """Every file-writing call in lrdmem/ sits in write.py, store.ensure_format or a known non-store writer."""
+        allowed = {("store.py", "ensure_format"), ("config.py", "save"), ("session.py", "save"),
+                   ("install.py", "_write"), ("cli.py", "_graph"), ("claude.py", "link_claude_memory")}
+        # device config, session state, harness configs, graph --output, Claude's auto-memory link: not store content
+        found = set()
+        for path in sorted((Path(__file__).parent.parent / "lrdmem").rglob("*.py")):
+            if path.name != "write.py":
+                found |= {(path.name, fn) for fn in _writers(path.read_text())}
+        self.assertTrue({("store.py", "ensure_format"), ("config.py", "save")} <= found)  # the scan is live
+        self.assertEqual(found - allowed, set())
+
+
+_WRITE_CALLS = {"write_text", "write_bytes", "symlink_to", "hardlink_to", "mkstemp", "touch"}
+_OWNED = {"os": {"open", "replace", "rename", "link", "symlink"}, "shutil": {"copy", "copy2", "copyfile", "move"}}
+
+
+def _writers(source: str) -> set[str]:
+    """Names of the functions (or <module>) holding a call that can write a file."""
+    import ast
+    out = set()
+
+    def visit(node, scope):
+        for child in ast.iter_child_nodes(node):
+            inner = child.name if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) else scope
+            if isinstance(child, ast.Call):
+                f = child.func
+                name = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", "")
+                owner = getattr(getattr(f, "value", None), "id", "")
+                modes = [a.value for a in child.args[1:2] + [k.value for k in child.keywords if k.arg == "mode"]
+                         if isinstance(a, ast.Constant)]
+                if (name in _WRITE_CALLS or name in _OWNED.get(owner, ())
+                        or (name in ("open", "fdopen") and any(set(str(m)) & set("wax+") for m in modes))):
+                    out.add(scope)
+            visit(child, inner)
+
+    visit(ast.parse(source), "<module>")
+    return out
+
+
 if __name__ == "__main__":
     unittest.main()

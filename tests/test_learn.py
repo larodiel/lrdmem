@@ -110,6 +110,11 @@ class LearnTest(unittest.TestCase):
         self.assertIn("newer", str(cm.exception))
         self.assertFalse((self.root / "acme/web/spaces.md").exists())
 
+    def test_refused_learn_writes_no_format_marker(self):
+        with self.assertRaises(LearnRefused):
+            self.learn(memory="spaces", **dict(NEW, body="token = " + "abcdef123456"))
+        self.assertFalse((self.root / ".lrdmem-format").exists())
+
     def test_symlinks_refused(self):
         evil = self.tmp / "evil"
         evil.mkdir()
