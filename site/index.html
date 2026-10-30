@@ -8,7 +8,9 @@
 <meta property="og:title" content="lrdmem — one memory for every coding agent">
 <meta property="og:description" content="Teach your coding agents once. Every agent, on every machine, remembers.">
 <meta property="og:type" content="website">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%237c5cff'/%3E%3Ccircle cx='11' cy='12' r='3' fill='white'/%3E%3Ccircle cx='21' cy='12' r='3' fill='white'/%3E%3Ccircle cx='16' cy='22' r='3' fill='white'/%3E%3Cpath d='M11 12L21 12L16 22Z' stroke='white' stroke-width='1.5' fill='none'/%3E%3C/svg%3E">
+<link rel="icon" href="logo.svg" type="image/svg+xml">
+<meta property="og:image" content="https://larodiel.github.io/lrdmem/social.png">
+<meta name="twitter:card" content="summary_large_image">
 <style>
 :root {
   --bg: #fbfaf8; --surface: #ffffff; --surface-2: #f3f1ed; --text: #1b1a1f; --muted: #5f5c66; --line: #e4e1db;
@@ -51,7 +53,6 @@ nav { position: sticky; top: 0; z-index: 10; background: color-mix(in srgb, var(
 nav .wrap { display: flex; align-items: center; gap: 20px; height: 60px; }
 .logo { font: 700 1.1rem var(--mono); color: var(--text); display: flex; align-items: center; gap: 8px; }
 .logo:hover { text-decoration: none; }
-.logo i { width: 22px; height: 22px; border-radius: 6px; background: var(--accent); display: inline-block; }
 .navlinks { display: flex; gap: 18px; margin-left: auto; align-items: center; }
 .navlinks a { color: var(--muted); font-size: 0.93rem; }
 .navlinks a:hover { color: var(--text); text-decoration: none; }
@@ -152,7 +153,7 @@ footer a { color: var(--muted); }
 
 <nav aria-label="Main">
   <div class="wrap">
-    <a class="logo" href="#top"><i aria-hidden="true"></i>lrdmem</a>
+    <a class="logo" href="#top"><img src="logo.svg" alt="" width="24" height="24">lrdmem</a>
     <div class="navlinks">
       <a class="hide-sm" href="#how">How it works</a>
       <a class="hide-sm" href="#install">Install</a>

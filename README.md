@@ -1,3 +1,5 @@
+<p align="center"><img src="site/logo.svg" alt="lrdmem logo" width="112"></p>
+
 # lrdmem
 
 **Teach your coding agents once. Every agent, on every machine, remembers.**
