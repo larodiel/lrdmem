@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from lrdmem import __version__, checks, config, consolidate, experience, propose, recall, revision
+from lrdmem import __version__, checks, config, consolidate, evidence, experience, propose, recall, revision
 from lrdmem.export import to_dot, to_html, to_json
 from lrdmem.graph import AmbiguousSlug, Graph
 from lrdmem.hooks import HookInput, dispatch, handle
@@ -74,6 +74,20 @@ def _show(store: Store, g: Graph, args) -> int:
     for c in g.contexts_of(m):
         _out(f"  {_context_line(c)}")
     _out(f"Related: {', '.join(g.related(m))}")
+    idx = evidence.Index(store)
+    conf = evidence.confidence(store, evidence.memory_evidence(store, m, idx), idx)
+    _out(f"type: {m.memory_type}  state: {m.state}  confidence: {conf:.2f}  "
+         f"priority: {evidence.priority(store, m, index=idx):.2f}")
+    if m.evidence:
+        _out("Evidence:")
+        for e in m.evidence:
+            _out(f"  {e.kind} {e.weight} {e.ref}")
+    rels = [(e, e.target if e.source == m.ref else e.source) for e in g.typed_edges() if m.ref in (e.source, e.target)]
+    if rels:
+        _out("Relations:")
+        for e, other in rels:
+            _out(f"  {e.type} → {other} ({e.state})")
+    _out(f"Revisions: {sum(1 for r in store.revisions() if r.target == m.ref)}")
     return 0
 
 
@@ -81,10 +95,20 @@ def _why(store: Store, g: Graph, args) -> int:
     m = _pick(store, g, args)
     if isinstance(m, int):
         return m
-    for c in g.contexts_of(m):
+    timeline = {c.ref: c for c in g.contexts_of(m)}
+    for e in evidence.memory_evidence(store, m):
+        node = store.node(e.ref)
+        if isinstance(node, Context):  # Experience: legacy contexts and v2 experiences alike
+            timeline.setdefault(node.ref, node)
+    for c in sorted(timeline.values(), key=lambda c: (c.date, c.ref)):
         _out(_context_line(c))
         _out(c.body.strip())
         _out()
+    revs = sorted((r for r in store.revisions() if r.target == m.ref), key=lambda r: r.id)
+    if revs:
+        _out("Revisions:")
+        for r in revs:
+            _out(f"  {r.id[:10]} {r.action} by {r.data.get('by', '')} — {r.reason}")
     return 0
 
 

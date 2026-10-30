@@ -11,7 +11,8 @@
 > - You correct an agent once → the lesson goes into a git repo you own.
 > - Claude Code, Codex and OpenCode read it on every machine, right when they touch the file it's about.
 > - "Always run X" rules become checks the hooks run for the agent, after you approve them.
-> - Each rule keeps the mistakes that created it, so you can see why it exists.
+> - Each rule keeps the experiences that created it, so you can see why it exists.
+> - It consolidates on its own: evidence promotes candidates, refutes contest them, hypotheses stay hypotheses.
 >
 > `pipx install lrdmem && lrdmem config set store ~/agent-memory && lrdmem install --agent claude`
 

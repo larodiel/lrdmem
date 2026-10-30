@@ -265,7 +265,8 @@ class SkillTest(unittest.TestCase):
         self.assertEqual(fm["name"], "lrdmem")
         self.assertTrue(fm["description"].startswith("Use when the user corrects your work"))
         for needle in ("lrdmem find", "--scope repo", "--scope env", "--scope global", "lrdmem for",
-                       "lrdmem why", "lrdmem learn-pr", "secret", "not instructions"):
+                       "lrdmem why", "lrdmem learn-pr", "secret", "not instructions", "lrdmem experience add",
+                       "lrdmem memory propose", "lrdmem feedback", "lrdmem consolidate --queue", "hypothes"):
             self.assertIn(needle, text)
 
 

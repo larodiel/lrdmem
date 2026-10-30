@@ -2,6 +2,7 @@
 
 import json
 
+from lrdmem import evidence
 from lrdmem.graph import Graph
 from lrdmem.store import Context, Memory
 
@@ -15,10 +16,17 @@ def _first(c: Context) -> str:
 
 
 def to_json(graph: Graph) -> dict:
-    """Nodes (memories and contexts) and edges (context, link, supersedes), ids are store-relative paths."""
+    """Nodes (memories, experiences) and edges, ids are store-relative paths.
+
+    Memory nodes carry memory_type, state and the computed confidence; every edge carries rel and state: typed
+    edges (file edges and v0.1 `[[links]]` as related_to), frontmatter `supersedes`, and experience → memory
+    `context` links (shown as validated).
+    """
+    idx = evidence.Index(graph.store)
     nodes = [
         {"id": _id(graph, m), "type": "memory", "kind": m.kind, "env": m.env or "", "label": m.slug,
-         "strength": graph.strength(m)}
+         "strength": graph.strength(m), "memory_type": m.memory_type, "state": m.state,
+         "confidence": round(evidence.confidence(graph.store, evidence.memory_evidence(graph.store, m, idx), idx), 3)}
         for m in graph.memories()
     ]
     nodes += [
@@ -26,7 +34,9 @@ def to_json(graph: Graph) -> dict:
          "strength": 0}
         for c in graph.store.experiences()
     ]
-    edges = [{"source": _id(graph, s), "target": _id(graph, t), "rel": rel} for s, t, rel in graph.edges()]
+    edges = [{"source": _id(graph, s), "target": _id(graph, t), "rel": rel, "state": "validated"}
+             for s, t, rel in graph.edges() if rel != "link"]  # [[links]] come from typed_edges as related_to
+    edges += [{"source": e.source, "target": e.target, "rel": e.type, "state": e.state} for e in graph.typed_edges()]
     return {"nodes": nodes, "edges": edges}
 
 

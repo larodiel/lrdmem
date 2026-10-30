@@ -147,6 +147,30 @@ class CliReadTest(unittest.TestCase):
         self.assertLess(out.index("2026-01-01"), out.index("2026-03-01"))
         self.assertIn("first line of c1\nmore", out)
 
+    def test_show_and_why_v2_fields(self):
+        exp = ("---\nid: e1\ndate: 2026-10-20T10:00:00Z\nkind: discovery\nagent: codex\ndevice: d\n"
+               "source: chat\n---\n\nmigration failed\n")
+        mem = ("---\nname: deps\ndescription: deps first\nmetadata:\n  type: feedback\n  memory_type: procedural\n"
+               "  state: candidate\n  author: t\n  created: 2026-10-20\n  updated: 2026-10-20\n"
+               "evidence: [{ref: work/web/experiences/e1, kind: supports, weight: 1.0}]\n---\nUpdate deps first.\n")
+        edge = ("---\nid: x1\nsource: work/web/deps\ntarget: work/web/other\ntype: caused_by\nstate: proposed\n---\n")
+        rev = ("---\nid: 2026-10-20-r1\ntarget: work/web/deps\naction: create\nby: codex\nreason: new\n"
+               "before:\nafter:\n  state: candidate\n---\n")
+        files = {"work/web/MEMORY.md": "", "work/web/deps.md": mem, "work/web/other.md": _mem("other"),
+                 "work/web/experiences/e1.md": exp, "work/web/edges/x1.md": edge,
+                 "work/web/revisions/2026-10-20-r1.md": rev}
+        code, out, err = self.run_cli("show", "deps", "--env", "work", files=files)
+        self.assertEqual(code, 0, err)
+        self.assertIn("type: procedural  state: candidate  confidence: 0.63", out)
+        self.assertIn("Evidence:\n  supports 1.0 work/web/experiences/e1", out)
+        self.assertIn("Relations:\n  caused_by → work/web/other (proposed)", out)
+        self.assertIn("Revisions: 1", out)
+        _, out, _ = self.run_cli("why", "deps", "--env", "work", files=files)
+        self.assertIn("2026-10-20T10:00:00Z codex chat — migration failed", out)
+        self.assertIn("Revisions:\n  2026-10-20 create by codex — new", out)
+        _, out, _ = self.run_cli("find", "migration", files=files)
+        self.assertIn("context work/web/experiences/e1 — migration failed", out)
+
     def test_ambiguous_and_unknown(self):
         code, _, err = self.run_cli("show", "phpcs")
         self.assertEqual(code, 2)

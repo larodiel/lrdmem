@@ -30,6 +30,10 @@ actionlint .github/workflows/*.yml                       # after editing workflo
 | `triggers.py` | `in_scope`, `matches` (trigger globs/prefixes), `CAVEAT` |
 | `recall.py` | `recall` (scored, budgeted; hooks use `for_hook=True`), `render`, `to_json` |
 | `lint.py` | store checks, `SECRET`, `printable()` |
+| `model.py`, `write.py`, `revision.py` | v2 constants and `today_utc`; the only write path (secret guard); revisions |
+| `experience.py`, `propose.py`, `edges.py` | experiences and feedback; validated candidates; typed relations |
+| `evidence.py`, `search.py`, `consolidate.py` | confidence/priority on read; BM25+graph search; consolidation and queue |
+| `commitmsg.py` | Conventional Commits messages for every lrdmem commit |
 | `learn.py`, `pr.py` | writing contexts/memories; PR review ingestion |
 | `checks.py`, `config.py` | obligation approval (hash allowlist) and execution; device config |
 | `sync.py` | git pull/commit/push per environment repo |
@@ -71,5 +75,7 @@ Changes must keep all of these true. A change that weakens one needs an explicit
    label injected memory as reference data, not instructions.
 6. Hooks commit/push only where autopush is on; sync never autostashes, never force-pushes, never aborts a rebase
    it didn't start, and never commits unmerged paths.
-7. `install` validates every target before writing, backs up edited files, edits symlinked configs through the link,
+7. Every store write goes through `write.py`, which refuses secrets (also JSON-escaped ones) and symlinked targets;
+   experiences are never edited; consolidation changes are evidence-based, idempotent and recorded as revisions.
+8. `install` validates every target before writing, backs up edited files, edits symlinked configs through the link,
    and removes only hooks it owns (plus the legacy `bin/memory context` hook).

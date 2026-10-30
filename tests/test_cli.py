@@ -42,7 +42,8 @@ class CliTest(unittest.TestCase):
         text = (root / "README.md").read_text() + (root / "docs" / "guide.md").read_text()
         for needle in ("kind: obligation", "check:", "lrdmem allow", "lrdmem check --on", "config autopush",
                        "learn-pr", "collaborators", "GitHub remote", "--why", "--how", "--paths", "--repos",
-                       "install --agent opencode` copies the plugin"):
+                       "install --agent opencode` copies the plugin",
+                       "recall", "consolidate", "feedback", "memory propose", "experience add"):
             self.assertIn(needle, text)
 
 

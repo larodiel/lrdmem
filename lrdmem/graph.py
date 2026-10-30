@@ -120,7 +120,7 @@ class Graph:
         ]
         mems.sort(key=lambda m: (-len(self._contexts.get((m.env, m.slug), [])), m.slug))
         ctxs = [
-            c for c in self.store.contexts()
+            c for c in self.store.experiences()
             if (env is None or c.env in (None, env)) and t in f"{c.id}\n{c.body}".lower()
         ]
         return mems + sorted(ctxs, key=lambda c: c.date)

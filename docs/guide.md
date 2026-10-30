@@ -8,13 +8,60 @@ The full reference. For the pitch and quick start, see the [README](../README.md
 lrdmem find TERM | show SLUG | why SLUG | hot | stale     # read the store
 lrdmem recall [QUERY] [--file F] [--command C] [--json]    # most relevant memories, with signals and relations
 lrdmem for FILE [--command CMD]                           # what a hook injects for a file or command
-lrdmem learn ... | learn-pr URL --agent NAME              # record lessons
+lrdmem learn ... | learn-pr URL --agent NAME              # record corrections (active right away)
+lrdmem experience add --kind K --agent A TEXT             # record what happened (immutable)
+lrdmem associate [QUERY] [--file F]                       # memories related to a candidate, with signals
+lrdmem memory propose < payload.json                      # validated candidates from an experience
+lrdmem feedback REF useful|incorrect|irrelevant           # signal on a recalled memory
+lrdmem consolidate [--queue | --resolve ITEM DECISION]    # automatic consolidation and the judgment queue
+lrdmem revert REVISION                                    # undo one recorded change
 lrdmem lint | graph --format html|json|dot -o OUT         # check and visualise the store
 lrdmem allow [SLUG] | check --on stop|post-edit --files F...  # approve and run obligation checks
 lrdmem sync [ENV]                                         # commit, pull and push the store
 lrdmem config set store PATH | set device NAME | autopush on|off [--env ENV] | show
 lrdmem install --agent claude|codex|opencode [--dry-run]  # wire hooks and the skill
 ```
+
+## Memory model
+
+- **Experience** (`<scope>/experiences/`): an immutable observation — error, decision, discovery, outcome, execution,
+  correction, review, feedback or check. Legacy `contexts/` files read as corrections.
+- **Memory** (`<scope>/<slug>.md`): the reusable representation. `metadata.memory_type` is episodic, semantic,
+  procedural, hypothesis, prospective or metacognitive; `metadata.state` is candidate, active, contested, superseded
+  or obsolete; `evidence: [{ref, kind, weight}]` lists the experiences behind it (supports, refutes, observed_in).
+  Confidence and priority are computed on read, never stored. Memories without the new fields read as semantic and
+  active, and their legacy contexts count as supporting evidence.
+- **Relation** (`<scope>/edges/`): a typed edge (related_to, derived_from, occurred_in, supports, contradicts,
+  caused_by, resolved_by, generalizes, supersedes) with a state (proposed, validated, invalidated, superseded) and
+  evidence. `[[links]]` read as validated related_to.
+- **Revision** (`<scope>/revisions/`): every relevant change, with before, after and reason; `lrdmem revert` undoes
+  one.
+
+## Lifecycle
+
+1. `lrdmem experience add` records what happened before anything else (a `--request-id` makes retries no-ops).
+2. The agent reads `lrdmem associate` and proposes candidates with `lrdmem memory propose` (JSON on stdin:
+   `{"experience": ref, "candidates": [...]}`); the code validates types, states, scope, sizes and secrets before
+   writing. Agent-extracted candidates start as `candidate`; a hypothesis is never stored as a fact; a user
+   correction (`learn`, `learn-pr`) starts `active`.
+3. Classification: `new`, `equivalent` (adds evidence, no new memory), `complementary` (proposed related_to or
+   generalizes edge), `contradicts` (proposed contradicts edge; only a correction can contest an active memory),
+   `insufficient`.
+4. `lrdmem consolidate` runs at the end of each task (20 s, resumable): expired memories become obsolete, exact
+   duplicates merge into the oldest, candidates with 2 independent supports become active, refuted memories become
+   contested (and come back when supports dominate), edges with 2 independent evidences are validated. Hypotheses
+   with outcome evidence, repeated experiences without a procedure and paraphrase suspects go to the judgment queue
+   for an agent to resolve (`--queue`, `--resolve`). Independence means a different agent, device or day; access
+   counts and repetition never promote.
+5. `lrdmem feedback` adds a signal (useful supports, incorrect refutes, irrelevant lowers priority); one negative
+   never changes a state. Hooks record each obligation check as a `check` experience.
+
+Recall (`lrdmem recall`, and hooks before edits and commands) combines lexical search (accent-aware BM25), file and
+command entities, triggers, up to 2 hops in the graph, state, confidence, validity and priority. Hooks inject only
+active and contested memories; explicit recall also shows candidates and hypotheses, labelled as not confirmed.
+
+Every commit lrdmem makes follows Conventional Commits: `feat(memory): learn …`, `refactor(memory): consolidate —
+merge N, promote N, contest N`, `revert(memory): <revision>`, `chore(memory): sync <env> from <device>`.
 
 ## Recording lessons
 

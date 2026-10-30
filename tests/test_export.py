@@ -20,18 +20,28 @@ class ExportTest(unittest.TestCase):
         d = to_json(self._graph(_files()))
         rels = [e["rel"] for e in d["edges"]]
         self.assertEqual(rels.count("context"), 4)  # c0 -> phpcs, other; c1, c2 -> phpcs
-        self.assertEqual(rels.count("link"), 1)
-        self.assertIn({"source": "work/app/phpcs", "target": "_global/style", "rel": "link"}, d["edges"])
+        self.assertEqual(rels.count("related_to"), 1)
+        self.assertIn({"source": "work/app/phpcs", "target": "_global/style", "rel": "related_to",
+                       "state": "validated"}, d["edges"])
         self.assertIn({"source": "work/app/contexts/2026-03-01-c0", "target": "work/app/phpcs",
-                       "rel": "context"}, d["edges"])
+                       "rel": "context", "state": "validated"}, d["edges"])
         ids = [n["id"] for n in d["nodes"]]
         self.assertEqual(len(ids), len(set(ids)))
         phpcs = next(n for n in d["nodes"] if n["id"] == "work/app/phpcs")
         self.assertEqual((phpcs["type"], phpcs["strength"], phpcs["env"]), ("memory", 3, "work"))
+        self.assertEqual((phpcs["memory_type"], phpcs["state"]), ("semantic", "active"))  # no explicit kind: semantic (spec §8)
+        self.assertGreater(phpcs["confidence"], 0)  # legacy contexts count as supports
 
     def test_supersedes_edge(self):
         g = self._graph({"work/app/a.md": _mem("a", extra="supersedes: [b]\n"), "work/app/b.md": _mem("b")})
-        self.assertEqual(to_json(g)["edges"], [{"source": "work/app/a", "target": "work/app/b", "rel": "supersedes"}])
+        self.assertEqual(to_json(g)["edges"], [{"source": "work/app/a", "target": "work/app/b", "rel": "supersedes",
+                                                "state": "validated"}])
+
+    def test_file_edges_carry_type_and_state(self):
+        edge = ("---\nid: e1\nsource: work/app/a\ntarget: work/app/b\ntype: contradicts\nstate: proposed\n---\n")
+        g = self._graph({"work/app/a.md": _mem("a"), "work/app/b.md": _mem("b"), "work/app/edges/e1.md": edge})
+        self.assertIn({"source": "work/app/a", "target": "work/app/b", "rel": "contradicts", "state": "proposed"},
+                      to_json(g)["edges"])
 
     def test_dot(self):
         g = self._graph({"work/app/a.md": _mem("a"), "work/app/b.md": _mem("b", "see [[a]]")})
