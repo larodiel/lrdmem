@@ -10,7 +10,8 @@
 ![License: MIT](https://img.shields.io/badge/license-MIT-black)
 
 [Website](https://larodiel.github.io/lrdmem/) · [Guide](docs/guide.md) ·
-[Environments and projects](#environments-and-projects) · [Commands](#commands) ·
+[Environments and projects](#environments-and-projects) · [Sync](#sync-between-computers) ·
+[Commands](#commands) ·
 [Contributing](CONTRIBUTING.md)
 
 > **TL;DR**
@@ -261,6 +262,76 @@ store only for an identical command at an identical path.
   `<env>/_global/` (pass `--repos` to say which repos it applies to), `--scope global` to `_global/`.
 - **Don't move a project folder once it has memories.** Evidence and relations refer to store paths such as
   `work/shop-frontend/experiences/…`; moving the folder breaks them (`lrdmem lint` lists every broken ref).
+
+## Sync between computers
+
+The store is plain git, so every computer works on its own clone and lrdmem commits, pulls and pushes for you. Each
+repository syncs separately: the store root (with `_global/`) and every environment that is a repo of its own.
+
+### 1. Give every repository a remote (first computer)
+
+Create an empty private repository on GitHub (or any git host) for the store root and for each environment repo,
+then:
+
+```bash
+cd ~/agent-memory && git remote add origin git@github.com:you/agent-memory.git
+cd ~/repos/acme-memory && git remote add origin git@github.com:acme/agent-memory.git   # each environment repo
+lrdmem config set device desktop       # a name for this computer
+lrdmem sync                            # commits and pushes every repository
+```
+
+The first push sets the upstream for you.
+
+### 2. Set up the next computer
+
+Clone the store root, then put each environment repo where the store expects it. A linked environment is a
+symlink, and symlinks hold machine-specific paths, so recreate them on each computer instead of committing them
+(add the environment names to the store root's `.gitignore`):
+
+```bash
+git clone git@github.com:you/agent-memory.git ~/agent-memory
+git clone git@github.com:acme/agent-memory.git ~/repos/acme-memory
+ln -s ~/repos/acme-memory ~/agent-memory/acme
+lrdmem config set store ~/agent-memory
+lrdmem config set device notebook      # must differ from the other computer's name
+lrdmem install --agent claude          # and/or codex, opencode
+lrdmem lint                            # everything found and readable
+lrdmem allow                           # approvals are per computer: review and approve the checks again
+```
+
+The device name matters: evidence from two computers counts as independent, which is what promotes a candidate to
+an active rule.
+
+### 3. Keep them in sync
+
+Pick one, per computer and per environment:
+
+- **Automatic.** `lrdmem config autopush on` (or `--env acme` for one environment). Session start pulls (at most
+  3 seconds, so an offline laptop isn't held up) and the end of every task commits and pushes, skipping the network
+  when there is nothing new. Commit messages follow Conventional Commits.
+- **By hand.** `lrdmem sync` (or `lrdmem sync acme`) whenever you switch computers: it commits, pulls with
+  rebase, and pushes.
+
+Sync never force-pushes and never stashes your changes. It skips a repository with a rebase in progress, and it
+does not pull or push one that has uncommitted changes outside the memory folders.
+
+### When two computers changed the same memory
+
+The pull stops and sync reports the conflict; nothing is pushed. Resolve it like any git conflict, then sync again:
+
+```bash
+cd ~/agent-memory                     # or the environment repo sync named
+git status                            # the conflicting files
+# edit them, keeping both sides' lines where you can; experiences never conflict, they are new files
+git add -A && git rebase --continue
+lrdmem sync
+```
+
+### What stays on each computer
+
+Not synced, by design: the device config (`~/.config/lrdmem/config.json`: store path, device name, autopush,
+approved commands), the hooks and skill `lrdmem install` wrote, and session state. Approve check commands on each
+computer after reading them; an approval never travels through git.
 
 ## Commands
 
