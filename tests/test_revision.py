@@ -3,17 +3,17 @@ import os
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
-from datetime import date
 from pathlib import Path
 from unittest import mock
 
 from lrdmem import revision, write
 from lrdmem.cli import main
 from lrdmem.lint import lint
+from lrdmem.model import today_utc
 from lrdmem.store import Store
 from tests.fixtures import make_store
 
-TODAY = date.today().isoformat()
+TODAY = today_utc()
 MEM = ("---\nname: m\ndescription: d\nmetadata:\n  type: feedback\n  author: me\n  state: candidate\n  updated: 2020-01-01\n"
        "---\nbody\n\n**Why:** w\n**How to apply:** h\n")
 

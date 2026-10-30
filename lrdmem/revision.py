@@ -2,12 +2,11 @@
 
 import hashlib
 import json
-from datetime import date
 from pathlib import Path
 
 from lrdmem import write
 from lrdmem.frontmatter import dump
-from lrdmem.model import REVISION_ACTIONS
+from lrdmem.model import REVISION_ACTIONS, today_utc
 from lrdmem.store import Edge, Memory, Revision, Store
 
 
@@ -50,7 +49,7 @@ def _prepare(store: Store, folder: Path, target_ref: str, action: str, before: d
     if tip and (tip.action, tip.before, tip.after) == (action, before, after):
         return tip.path, None
     prev = tip.id if tip else ""
-    today = date.today().isoformat()
+    today = today_utc()
     digest = hashlib.sha1("|".join((prev, target_ref, action, _canonical(before), _canonical(after))).encode(),
                           usedforsecurity=False).hexdigest()[:8]
     rid = f"{today}-r{digest}"

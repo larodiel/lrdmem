@@ -2,6 +2,7 @@
 
 import math
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 MEMORY_TYPES = ("episodic", "semantic", "procedural", "hypothesis", "prospective", "metacognitive")
 STATES = ("candidate", "active", "contested", "superseded", "obsolete")
@@ -14,6 +15,12 @@ SOURCES = ("chat", "pr", "run", "check")
 EVIDENCE_KINDS = ("supports", "refutes", "observed_in")
 REVISION_ACTIONS = ("create", "merge", "state_change", "confidence_change",
                     "content_change", "invalidate", "supersede", "revert")
+
+
+def today_utc() -> str:
+    """Today's UTC date as YYYY-MM-DD; every date the store writes into ids, `created` or `updated` uses it, so devices
+    in different timezones produce identical ids."""
+    return datetime.now(timezone.utc).date().isoformat()
 
 
 def v01_memory_type(kind: str) -> str:

@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from lrdmem import __version__, checks, config, experience, propose, recall, revision
+from lrdmem import __version__, checks, config, consolidate, experience, propose, recall, revision
 from lrdmem.export import to_dot, to_html, to_json
 from lrdmem.graph import AmbiguousSlug, Graph
 from lrdmem.hooks import HookInput, dispatch, handle
@@ -335,6 +335,41 @@ def _revert(store: Store, g: Graph, args) -> int:
     return 0
 
 
+def _seconds(value: str) -> float:
+    n = float(value)
+    if not n >= 0 or n == float("inf"):
+        raise argparse.ArgumentTypeError("must be a number of seconds >= 0")
+    return n
+
+
+def _consolidate(store: Store, g: Graph, args) -> int:
+    try:
+        if args.resolve:
+            _out(consolidate.resolve(store, *args.resolve, into=args.into, note=args.note, by=args.agent))
+            return 0
+        if args.queue:
+            items = consolidate.open_items(store)
+            if args.json:
+                _out(json.dumps([{"id": q.id, "kind": q.kind, "subjects": q.subjects, "reason": q.body.strip()}
+                                 for q in items], indent=2))
+            for q in [] if args.json else items:
+                _out(f"{q.id} {q.kind}: {', '.join(q.subjects)}")
+                _out(f"  {' '.join(q.body.split())}")
+            return 0
+        r = consolidate.run(store, budget=args.budget)
+    except (ValueError, StoreFormatError, OSError) as e:
+        print(printable(str(e)), file=sys.stderr)
+        return 1
+    if args.json:
+        _out(json.dumps(r.to_dict(), indent=2))
+        return 0
+    for name, refs in r.to_dict().items():
+        if name != "incomplete" and refs:
+            _out(f"{name.replace('_', ' ')}: {', '.join(refs)}")
+    _out("incomplete: run again to finish" if r.incomplete else "consolidated")
+    return 0
+
+
 def _config(args) -> int:
     cfg = config.load()
     if args.action == "set":
@@ -578,6 +613,15 @@ def _main(argv: list[str] | None) -> int:
     p.set_defaults(fn=_revert)
     p.add_argument("revision", help="revision id or store-relative ref")
     p.add_argument("--agent", default="human", help="who reverts (recorded as the revision's by)")
+    p = sub.add_parser("consolidate", help="promote, contest, merge and queue judgments from evidence")
+    p.set_defaults(fn=_consolidate)
+    p.add_argument("--budget", type=_seconds, default=20.0, help="seconds; what is left waits for the next run")
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--queue", action="store_true", help="list the open judgment-queue items")
+    p.add_argument("--resolve", nargs=2, metavar=("ITEM", "DECISION"), help="apply a decision to a queue item")
+    p.add_argument("--into", help="ref of the memory a promote/create decision points to")
+    p.add_argument("--note", default="")
+    p.add_argument("--agent", default="human", help="who resolves (recorded as resolved_by)")
     p = sub.add_parser("sync", help="commit and push the store (all environments, or one)")
     p.set_defaults(fn=_sync)
     p.add_argument("env", nargs="?")

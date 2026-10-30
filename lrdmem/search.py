@@ -4,7 +4,7 @@ import math
 import re
 import unicodedata
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 
 from lrdmem.graph import Graph
@@ -45,23 +45,28 @@ def _mentions(text: str, entity: str) -> bool:
 
 def bm25(docs: list[tuple[str, str]], query: str, k1: float = 1.2, b: float = 0.75) -> list[tuple[str, float, list[str]]]:
     """Okapi BM25 of query over (id, text) docs: (id, score, top 5 matched terms), score desc then id; zero scores dropped."""
+    return next(bm25_scores(docs, [("", query)], k1, b))[1]
+
+
+def bm25_scores(docs: list[tuple[str, str]], queries: list[tuple[str, str]], k1: float = 1.2,
+                b: float = 0.75) -> Iterator[tuple[str, list[tuple[str, float, list[str]]]]]:
+    """`bm25` of each (query id, text) over the same docs, tokenised once; yields (query id, results) lazily."""
     toks = {i: Counter(_tokens(t)) for i, t in docs}
-    if not toks:
-        return []
-    avg = sum(sum(c.values()) for c in toks.values()) / len(toks) or 1.0
+    avg = sum(sum(c.values()) for c in toks.values()) / (len(toks) or 1) or 1.0
     df = Counter(t for c in toks.values() for t in c)
-    out = []
-    for i, c in toks.items():
-        length = sum(c.values())
-        parts = {}
-        for t in set(_tokens(query)):
-            if c[t]:
-                idf = math.log(1 + (len(toks) - df[t] + 0.5) / (df[t] + 0.5))
-                parts[t] = idf * c[t] * (k1 + 1) / (c[t] + k1 * (1 - b + b * length / avg))
-        if parts:
-            terms = sorted(parts, key=lambda t: (-parts[t], t))[:5]
-            out.append((i, sum(parts.values()), terms))
-    return sorted(out, key=lambda r: (-r[1], r[0]))
+    for qid, query in queries:
+        out = []
+        for i, c in toks.items():
+            length = sum(c.values())
+            parts = {}
+            for t in set(_tokens(query)):
+                if c[t]:
+                    idf = math.log(1 + (len(toks) - df[t] + 0.5) / (df[t] + 0.5))
+                    parts[t] = idf * c[t] * (k1 + 1) / (c[t] + k1 * (1 - b + b * length / avg))
+            if parts:
+                terms = sorted(parts, key=lambda t: (-parts[t], t))[:5]
+                out.append((i, sum(parts.values()), terms))
+        yield qid, sorted(out, key=lambda r: (-r[1], r[0]))
 
 
 def visible(node, env: str | None, repo: str | None) -> bool:

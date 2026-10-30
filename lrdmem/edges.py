@@ -6,11 +6,10 @@ write.py and leaves a revision in the edge's own scope folder.
 
 import hashlib
 import math
-from datetime import date
 
 from lrdmem import revision, write
 from lrdmem.frontmatter import dump
-from lrdmem.model import EDGE_STATES, EDGE_TYPES, Evidence
+from lrdmem.model import EDGE_STATES, EDGE_TYPES, Evidence, today_utc
 from lrdmem.store import Edge, Memory, Store
 
 _ACTION = {"invalidated": "invalidate", "superseded": "supersede"}
@@ -59,7 +58,7 @@ def create(store: Store, source_ref: str, target_ref: str, type: str, *, evidenc
     gone = sorted(e.id for e in store.edges() if (e.source, e.target, e.type) == same)
     key = "|".join(same + ((hashlib.sha1("|".join(gone).encode(), usedforsecurity=False).hexdigest(),) if gone else ()))
     digest = hashlib.sha1(key.encode(), usedforsecurity=False).hexdigest()[:12]
-    today = date.today().isoformat()
+    today = today_utc()
     write.target(store, folder, "edges/x.md")
     write.target(store, folder, "revisions/x.md")
     path = write.target(store, folder, f"edges/{today}-e{digest}.md")

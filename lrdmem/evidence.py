@@ -79,6 +79,13 @@ def confidence(store: Store, items: list[Evidence], index: Index | None = None) 
     max of the supports weight and 0.25 x the observed_in weight (never their sum), and refutes are the max refutes
     weight; S and R sum those over keys. Refutes can push S - R negative, which clamps to 0; no evidence gives 0.
     """
+    pos, neg = balance(store, items, index)
+    return _clamp(1 - math.exp(-(sum(pos.values()) - sum(neg.values()))))
+
+
+def balance(store: Store, items: list[Evidence], index: Index | None = None) -> tuple[dict, dict]:
+    """(positive, refutes) weight per independence key, as `confidence` counts them: only evidence resolving to an
+    experience; positive = max(supports w, 0.25 x observed_in w) per key, refutes = max refutes w per key."""
     pos: dict[tuple, float] = {}
     neg: dict[tuple, float] = {}
     for ev in items:
@@ -89,7 +96,7 @@ def confidence(store: Store, items: list[Evidence], index: Index | None = None) 
             neg[k] = max(neg.get(k, 0.0), ev.weight)
         elif ev.kind in ("supports", "observed_in"):
             pos[k] = max(pos.get(k, 0.0), ev.weight * (_OBSERVED if ev.kind == "observed_in" else 1.0))
-    return _clamp(1 - math.exp(-(sum(pos.values()) - sum(neg.values()))))
+    return pos, neg
 
 
 def memory_evidence(store: Store, memory, index: Index | None = None) -> list[Evidence]:

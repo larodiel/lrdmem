@@ -5,13 +5,13 @@ import subprocess
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
-from datetime import date
 from pathlib import Path
 from unittest import mock
 
 from lrdmem import cli, evidence, experience, propose, write
 from lrdmem.frontmatter import parse
 from lrdmem.lint import lint
+from lrdmem.model import today_utc
 from lrdmem.store import Memory, Store
 from tests.fixtures import make_store
 
@@ -73,7 +73,7 @@ class ProposeTest(_Base):
             m = self.mem(slug)
             self.assertEqual((m.memory_type, m.state), (mtype, "candidate"), slug)
             self.assertEqual([(x.ref, x.kind, x.weight) for x in m.evidence], [(e.ref, "observed_in", 1.0)])
-            self.assertEqual(m.created, date.today().isoformat())
+            self.assertEqual(m.created, today_utc())
             self.assertEqual(m.data["metadata"]["author"], "claude")
         self.assertNotIn("**Why:**", self.mem("migration-failed").body)
         self.assertIn("**Why:** because.\n**How to apply:** do it.", self.mem("procedure-deps").body)

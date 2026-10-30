@@ -3,17 +3,18 @@ import subprocess
 import tempfile
 import threading
 import unittest
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
 from lrdmem.frontmatter import parse
 from lrdmem.graph import Graph
 from lrdmem.learn import LearnRefused, learn
+from lrdmem.model import today_utc
 from lrdmem.store import Store
 from tests.fixtures import make_store
 
-TODAY = date.today().isoformat()  # learn touches `updated` with the local date
+TODAY = today_utc()  # learn touches `updated` with the UTC date
 UTC_TODAY = datetime.now(timezone.utc).date().isoformat()  # experiences (contexts) are named by UTC day
 KW = dict(mistake="used tabs", correction="use spaces", scope="repo", agent="claude")
 NEW = dict(KW, description="Indent with spaces always", body="Indent with spaces.", why="style.", how="spaces.")

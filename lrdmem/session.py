@@ -8,6 +8,17 @@ import tempfile
 from pathlib import Path
 
 
+def state_dir() -> Path | None:
+    """Private per-user state dir `$TMPDIR/lrdmem-<uid>/`, or None when it cannot be trusted (symlink, wrong owner)."""
+    d = Path(tempfile.gettempdir()) / f"lrdmem-{os.getuid()}"
+    try:
+        d.mkdir(mode=0o700, exist_ok=True)
+        st = d.lstat()
+    except OSError:
+        return None
+    return d if stat.S_ISDIR(st.st_mode) and st.st_uid == os.getuid() else None
+
+
 class Session:
     """Injected memory refs, edited files and Stop-block count for one agent session."""
 
@@ -29,18 +40,8 @@ class Session:
             except (OSError, ValueError, KeyError, TypeError):
                 self.injected, self.edited, self.stop_blocks = set(), [], 0  # corrupt: start empty
 
-    def _dir(self) -> Path | None:
-        """Private per-user state dir, or None when it cannot be trusted (symlink, wrong owner)."""
-        d = Path(tempfile.gettempdir()) / f"lrdmem-{os.getuid()}"
-        try:
-            d.mkdir(mode=0o700, exist_ok=True)
-            st = d.lstat()
-        except OSError:
-            return None
-        return d if stat.S_ISDIR(st.st_mode) and st.st_uid == os.getuid() else None
-
     def _path(self) -> Path | None:
-        d = self._dir() if self.id else None
+        d = state_dir() if self.id else None
         # sanitised so a hostile id cannot escape the state dir
         return d / (re.sub(r"[^A-Za-z0-9_-]", "_", self.id) + ".json") if d else None
 

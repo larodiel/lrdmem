@@ -6,13 +6,12 @@ is written for it, and a refused candidate leaves no file behind. `validate` run
 
 import os
 from dataclasses import dataclass, field
-from datetime import date
 from pathlib import Path
 
 from lrdmem import edges, evidence, revision, write
 from lrdmem.frontmatter import dump
 from lrdmem.learn import _RESERVED, _SCOPES, _SLUG, LearnRefused, _check_text, scope_folder
-from lrdmem.model import EDGE_TYPES, MEMORY_TYPES, Evidence
+from lrdmem.model import EDGE_TYPES, MEMORY_TYPES, Evidence, today_utc
 from lrdmem.search import visible
 from lrdmem.store import AmbiguousRepo, Experience, Memory, Store, StoreFormatError, resolve
 
@@ -255,7 +254,7 @@ def _create(store: Store, exp: Experience, item: Evidence, plan: dict, agent: st
     target = plan["target"]
     strong = item.kind == "supports" and mtype != "hypothesis" and cls != "insufficient"
     state = "active" if strong else "candidate"
-    today = date.today().isoformat()
+    today = today_utc()
     meta = {"type": "feedback", "memory_type": mtype, "state": state, "author": agent, "created": today,
             "updated": today}
     head = {"name": slug, "description": c["description"], "metadata": meta,

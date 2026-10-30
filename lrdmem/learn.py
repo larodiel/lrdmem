@@ -6,13 +6,12 @@ new one starts active with the experience as supporting evidence and an existing
 
 import re
 from dataclasses import dataclass, field
-from datetime import date
 from pathlib import Path
 
 from lrdmem import write
 from lrdmem.frontmatter import parse
 from lrdmem.lint import KINDS, SOURCES, has_secret
-from lrdmem.model import v01_memory_type
+from lrdmem.model import today_utc, v01_memory_type
 from lrdmem.store import AmbiguousRepo, Experience, Store, StoreFormatError, resolve
 
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
@@ -173,7 +172,7 @@ def learn(store: Store, cwd: Path, *, memory: str, mistake: str, correction: str
         if created and kind:
             write.set_fields(path, {"kind": kind})
         if not created:
-            _touch(path, date.today().isoformat())
+            _touch(path, today_utc())
         return LearnResult(exp.path, path, created, dups)
     except write.Refused as e:
         raise LearnRefused(str(e)) from None
