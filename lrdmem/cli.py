@@ -70,9 +70,10 @@ def _show(store: Store, g: Graph, args) -> int:
     _out(f"{m.slug} [{m.type}/{m.kind}] {_rel(store, m)}")
     _out(m.description)
     _out(m.body.strip())
-    _out("Contexts:")
-    for c in g.contexts_of(m):
-        _out(f"  {_context_line(c)}")
+    if contexts := g.contexts_of(m):
+        _out("Contexts:")
+        for c in contexts:
+            _out(f"  {_context_line(c)}")
     if related := g.related(m):
         _out(f"Related: {', '.join(related)}")
     idx = evidence.Index(store)
@@ -106,6 +107,8 @@ def _why(store: Store, g: Graph, args) -> int:
         _out(c.body.strip())
         _out()
     revs = sorted((r for r in store.revisions() if r.target == m.ref), key=lambda r: r.id)
+    if not timeline and not revs:
+        _out(f"No experiences or revisions recorded for {_rel(store, m)} yet.")
     if revs:
         _out("Revisions:")
         for r in revs:

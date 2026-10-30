@@ -362,7 +362,7 @@ labelled as not confirmed.
 | `--states S,S` | only these states, or `all` |
 | `--limit N` | at most N memories (default 10) |
 | `--hops N` | follow relations up to N hops (default 2) |
-| `--budget N` | output size budget in characters (default 1500) |
+| `--budget N` | output size budget in tokens, estimated as characters ÷ 4 (default 1500); the best match always shows |
 | `--json` | machine-readable output |
 | `--env ENV` | the environment |
 

@@ -70,7 +70,8 @@ def recall(store: Store, env: str, repo: str, *, query: str = "", files: Sequenc
     `exclude` are dropped. States: `states` ("all" = every state), default active, contested and candidate
     (hypotheses included). for_hook: states active and contested only, no graph expansion, only hits with a trigger
     or entity signal, and an <env>/_global memory needs triggers.repos (the v0.1 injection rule). Whole items are
-    kept in score order until the next would push the estimate (len(item)//4 tokens) past `budget`, at most `limit`.
+    kept in score order until the next would push the estimate (len(item)//4 tokens) past `budget`, at most `limit`;
+    the best one is always kept.
     Relations
     (validated first, at most MAX_RELATIONS) reach only nodes visible from env/repo; for hooks only active or
     contested memories (and experiences).
@@ -112,7 +113,7 @@ def recall(store: Store, env: str, repo: str, *, query: str = "", files: Sequenc
     for r in scored[:max(limit, 0)]:
         r.relations = relations.get(r.node.ref, [])[:MAX_RELATIONS]
         used += len(_item(r)) // 4
-        if used > budget:
+        if used > budget and chosen:
             break
         chosen.append(r)
     return chosen

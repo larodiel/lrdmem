@@ -19,12 +19,11 @@ from lrdmem import edges, evidence, revision, write
 from lrdmem.frontmatter import dump
 from lrdmem.graph import Graph
 from lrdmem.recall import _day
-from lrdmem.search import bm25_scores, visible
+from lrdmem.search import DUP_SUSPECT, bm25_scores, visible
 from lrdmem.session import state_dir
 from lrdmem.store import Memory, QueueItem, Store
 
 BY = "consolidate"
-DUP_SUSPECT = 0.45  # mean, over both directions, of the BM25 score of one memory relative to its self-score
 DECISIONS = {"possible-duplicate": ("merge", "keep-separate"), "promote-hypothesis": ("promote", "reject"),
              "generalize-procedure": ("create", "reject")}
 _LIVE = ("candidate", "active", "contested")

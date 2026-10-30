@@ -69,6 +69,26 @@ def bm25_scores(docs: list[tuple[str, str]], queries: list[tuple[str, str]], k1:
         yield qid, sorted(out, key=lambda r: (-r[1], r[0]))
 
 
+DUP_SUSPECT = 0.45  # mean, over both directions, of the BM25 score of one text relative to its self-score
+
+
+def alike(docs: list[tuple[str, str]], text: str) -> list[str]:
+    """Ids of docs that read like `text`: the mean of BM25(text → doc) and BM25(doc → text), each relative to the
+    query's self-score, is at least DUP_SUSPECT. Sharing a few common words is not enough."""
+    allof = [("", text)] + [d for d in docs if d[0]]
+    _, hits = next(bm25_scores(allof, [("", text)]))
+    scores = {i: sc for i, sc, _ in hits}
+    if not scores.get(""):
+        return []
+    forward = {i: sc / scores[""] for i, sc in scores.items() if i}
+    texts = dict(allof)
+    out = []
+    for i, back in bm25_scores(allof, [(i, texts[i]) for i in forward]):
+        own = {j: sc for j, sc, _ in back}
+        if own.get(i) and (forward[i] + own.get("", 0) / own[i]) / 2 >= DUP_SUSPECT:
+            out.append(i)
+    return out
+
 def visible(node, env: str | None, repo: str | None) -> bool:
     """True when a node (memory, experience, edge...) is seen from repo `repo` of `env`: it lives in _global,
     <env>/_global or <env>/<repo>, and a memory's triggers.repos list, when present, names the repo. env/repo None

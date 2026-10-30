@@ -171,6 +171,12 @@ class CliReadTest(unittest.TestCase):
         _, out, _ = self.run_cli("find", "migration", files=files)
         self.assertIn("context work/web/experiences/e1 — migration failed", out)
 
+    def test_show_and_why_without_experiences(self):
+        _, out, _ = self.run_cli("show", "lonely", "--env", "work")
+        self.assertNotIn("Contexts:", out)
+        code, out, _ = self.run_cli("why", "lonely", "--env", "work")
+        self.assertEqual((code, out), (0, "No experiences or revisions recorded for work/app/lonely yet.\n"))
+
     def test_ambiguous_and_unknown(self):
         code, _, err = self.run_cli("show", "phpcs")
         self.assertEqual(code, 2)

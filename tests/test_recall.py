@@ -243,7 +243,8 @@ class RecallTest(unittest.TestCase):
         got = recall(s, "work", "app", files=["a.php"], for_hook=True, now=NOW)
         self.assertEqual(self.refs(got)[0], "work/app/ob")  # equal score: obligations first, like v0.1
         self.assertEqual(len(got), 3)
-        self.assertEqual(recall(s, "work", "app", files=["a.php"], budget=100, exclude={"work/app/ob"}, now=NOW), [])
+        # the best match always comes back, even alone over the budget; the budget limits what follows it
+        self.assertEqual(len(recall(s, "work", "app", files=["a.php"], budget=100, exclude={"work/app/ob"}, now=NOW)), 1)
         self.assertEqual(len(recall(s, "work", "app", files=["a.php"], budget=99999, limit=4, now=NOW)), 4)
 
     def test_tiebreak_confidence_then_kind(self):

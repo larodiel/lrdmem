@@ -12,6 +12,7 @@ from lrdmem import write
 from lrdmem.frontmatter import parse
 from lrdmem.lint import KINDS, SOURCES, has_secret
 from lrdmem.model import today_utc, v01_memory_type
+from lrdmem.search import alike
 from lrdmem.store import AmbiguousRepo, Experience, Store, StoreFormatError, resolve
 
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
@@ -79,9 +80,9 @@ def _check_text(store: Store, fields: dict[str, str], scope: str, env: str | Non
 
 
 def _duplicates(store: Store, env: str | None, slug: str, description: str) -> list[str]:
-    mine = terms(slug.replace("-", " ") + " " + description)
-    return [m.slug for m in store.memories() if m.env in (None, env)
-            and len(mine & terms(m.slug.replace("-", " ") + " " + m.description)) >= 2]
+    mems = [m for m in store.memories() if m.env in (None, env)]
+    docs = [(str(n), m.slug.replace("-", " ") + " " + m.description) for n, m in enumerate(mems)]
+    return [mems[int(i)].slug for i in sorted(alike(docs, slug.replace("-", " ") + " " + description), key=int)]
 
 
 def _touch(path: Path, today: str) -> None:

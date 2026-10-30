@@ -75,6 +75,12 @@ class LearnTest(unittest.TestCase):
         self.assertTrue(r.created)
         self.assertEqual(r.duplicates, ["spaces"])
 
+    def test_shared_common_words_are_not_duplicates(self):
+        self.learn(memory="agent-rules", **dict(NEW, description="Agent rule files are symlinks; audit them before editing"))
+        r = self.learn(memory="phpcs-changed", **dict(NEW, description="Run phpcs on changed files before calling done"))
+        self.assertTrue(r.created)
+        self.assertEqual(r.duplicates, [])
+
     def test_secret_refused_nothing_written(self):
         secret = "token = abcdef123456"
         for field in ("mistake", "correction", "body", "description", "files", "pr", "agent"):
