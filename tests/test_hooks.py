@@ -458,3 +458,97 @@ class LinkClaudeMemoryTest(_Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+SUBJECT = r"^(feat|refactor|revert|chore)\(memory\): [a-z0-9].{0,60}$"
+
+
+def _exp(name, agent):
+    return (f"work/app/experiences/{name}.md",
+            f"---\nid: {name}\ndate: 2026-10-20T10:00:00Z\nkind: discovery\nagent: {agent}\ndevice: d\n"
+            "source: chat\n---\n\nseen\n")
+
+
+CANDIDATE = ("---\nname: cand\ndescription: candidate rule\nmetadata:\n  type: feedback\n  memory_type: semantic\n"
+             "  state: candidate\n  author: t\n  created: 2026-10-01\n  updated: 2026-10-01\n"
+             "evidence: [{ref: work/app/experiences/s1, kind: supports, weight: 1.0}, "
+             "{ref: work/app/experiences/s2, kind: supports, weight: 1.0}]\n---\nRule.\n\n**Why:** w\n**How to apply:** h\n")
+
+
+class V2HookTest(_Base):
+    def checks_store(self, marker):
+        store = self.store({"work/app/lint-php.md": _ob(f"test -e {marker}", "post-edit")})
+        self.approve(store)
+        return store
+
+    def exps(self, kind="check"):
+        return [e for e in Store(self.root).experiences() if e.kind == kind]
+
+    def test_check_outcomes_recorded_once_per_session(self):
+        marker = self.tmp / "ok"
+        self.checks_store(marker)
+        self.hook("post-tool", self.payload("post_tool_edit"))
+        self.hook("post-tool", self.payload("post_tool_edit"))
+        fails = self.exps()
+        self.assertEqual(len(fails), 1)
+        self.assertIn("failed", fails[0].body)
+        m = next(m for m in Store(self.root).memories() if m.slug == "lint-php")
+        self.assertEqual([(e.ref, e.kind, e.weight) for e in m.evidence], [(fails[0].ref, "observed_in", 0.5)])
+        marker.write_text("x")
+        self.hook("post-tool", self.payload("post_tool_edit"))
+        self.hook("post-tool", self.payload("post_tool_edit"))
+        checks_ = self.exps()
+        self.assertEqual(len(checks_), 2)
+        passed = next(e for e in checks_ if "passed" in e.body)
+        m = next(m for m in Store(self.root).memories() if m.slug == "lint-php")
+        self.assertIn((passed.ref, "supports", 1.0), [(e.ref, e.kind, e.weight) for e in m.evidence])
+
+    def test_pass_without_prior_failure_records_experience_only(self):
+        marker = self.tmp / "ok"
+        marker.write_text("x")
+        self.checks_store(marker)
+        self.hook("post-tool", self.payload("post_tool_edit"))
+        self.assertEqual(len(self.exps()), 1)
+        m = next(m for m in Store(self.root).memories() if m.slug == "lint-php")
+        self.assertEqual(m.evidence, [])
+
+    def test_candidate_obligation_never_runs(self):
+        ob = _ob("echo ran > " + str(self.tmp / "ran") + " && exit 1", "post-edit")
+        ob = ob.replace("  kind: obligation\n", "  kind: obligation\n  state: candidate\n")
+        store = self.store({"work/app/lint-php.md": ob})
+        self.approve(store)
+        self.assertEqual(self.hook("post-tool", self.payload("post_tool_edit")), "")
+        self.assertFalse((self.tmp / "ran").exists())
+
+    def test_stop_consolidates_then_autopushes_in_one_commit(self):
+        self.store({"work/app/cand.md": CANDIDATE, **dict([_exp("s1", "a1"), _exp("s2", "a2")])})
+        git(self.root, "init", "-q")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-qm", "init")
+        cfg = config.load()
+        cfg["autopush"] = {"*": True}
+        config.save(cfg)
+        self.hook("stop", self.payload("stop"))
+        cand = next(m for m in Store(self.root).memories() if m.slug == "cand")
+        self.assertEqual(cand.state, "active")
+        self.assertEqual(git(self.root, "status", "--porcelain"), "")
+        subjects = git(self.root, "log", "--format=%s").splitlines()
+        self.assertEqual(len(subjects), 2)
+        self.assertRegex(subjects[0], SUBJECT)
+        self.assertTrue(subjects[0].startswith("refactor(memory): consolidate"))
+
+    def test_blocked_stop_consolidates_nothing(self):
+        store = self.store({"work/app/cand.md": CANDIDATE, **dict([_exp("s1", "a1"), _exp("s2", "a2")]),
+                            "work/app/lint-php.md": _ob("exit 1", "stop")})
+        self.approve(store)
+        self.hook("post-tool", self.payload("post_tool_edit"))
+        self.assertIn("decision", self.hook("stop", self.payload("stop")))
+        self.assertEqual(next(m for m in Store(self.root).memories() if m.slug == "cand").state, "candidate")
+
+    def test_session_start_shows_pending_decisions(self):
+        q = ("---\nid: q-abc\nkind: possible-duplicate\nsubjects: [work/app/php-style, work/app/x]\nstatus: open\n"
+             "resolution: \"\"\nresolved_by: \"\"\nresolved_at: \"\"\n---\n\nmaybe duplicates\n")
+        self.store({"work/app/queue/q-abc.md": q})
+        text = json.loads(self.hook("session-start", self.payload("session_start")))
+        self.assertIn("1 memory decision(s) pending: run `lrdmem consolidate --queue`",
+                      text["hookSpecificOutput"]["additionalContext"])

@@ -174,8 +174,8 @@ def _message(repo: Path, label: str, spec: list[str]) -> str:
 
 
 def _sync_one(label: str, repo: Path, include: str, excludes: list[str], message: str,
-              skip_idle: bool = False, own_repos: list[str] = ()) -> SyncResult:
-    spec = ["--", f":(literal){include}" if include != "." else ".",
+              skip_idle: bool = False, own_repos: list[str] = (), extras: list[str] = ()) -> SyncResult:
+    spec = ["--", f":(literal){include}" if include != "." else ".", *(f":(literal){x}" for x in extras),
             *(f":(exclude,literal){e}" for e in excludes), ":(exclude,glob)**/.*.tmp"]  # write.create temp files
     committed = pushed = False
     try:
@@ -236,7 +236,10 @@ def sync(store: Store, env: str | None = None, message: str | None = None,
                     and toplevel(store.root / n, store.root.parent) != top and not _ignored(top, n)]
         own = [n for n in store.environments() if include == "." and top == store.root.resolve()
                and toplevel(store.root / n, store.root.parent) != top]  # env repos, ignored ones too
-        results.append(_sync_one(label, top, include, excludes, message, skip_idle, own))
+        # the store-format marker lives at the root: a scoped sync of the root repo carries it too
+        extras = [".lrdmem-format"] if include != "." and top == store.root.resolve() \
+            and (store.root / ".lrdmem-format").is_file() else []
+        results.append(_sync_one(label, top, include, excludes, message, skip_idle, own, extras))
     return results
 
 

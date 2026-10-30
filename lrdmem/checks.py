@@ -25,6 +25,7 @@ class CheckResult:
     skipped_pending: list[str] = field(default_factory=list)
     ran: list[str] = field(default_factory=list)
     unrunnable: list[tuple[str, str]] = field(default_factory=list)
+    outcomes: list[tuple[Memory, bool, str, list[str]]] = field(default_factory=list)  # (memory, passed, tail, files)
 
 
 def key(store: Store, memory: Memory) -> str:
@@ -120,8 +121,8 @@ def run_checks(store: Store, env: str, repo: str, repo_root: Path, on: str, file
     result = CheckResult()
     deadline = time.monotonic() + (TIMEOUT if budget is None else budget)
     for m in store.memories():
-        if not command_text(m) or m.check.get("on") != on:
-            continue
+        if not command_text(m) or m.check.get("on") != on or m.state != "active":
+            continue  # only active obligations: candidates and contested ones are never enforced
         hit = [f for f in files if matches(m, env, repo, path=f, env_wide=True)]
         if not hit:
             continue
@@ -144,9 +145,12 @@ def run_checks(store: Store, env: str, repo: str, repo_root: Path, on: str, file
         except subprocess.TimeoutExpired:
             _kill(proc)
             result.failures.append((m.slug, f"timed out after {math.ceil(left)}s"))
+            result.outcomes.append((m, False, f"timed out after {math.ceil(left)}s", hit))
             continue
+        tail = "\n".join(out.splitlines()[-TAIL:])
         if proc.returncode:
-            result.failures.append((m.slug, "\n".join(out.splitlines()[-TAIL:])))
+            result.failures.append((m.slug, tail))
         else:
             result.ran.append(m.slug)
+        result.outcomes.append((m, not proc.returncode, tail, hit))
     return result

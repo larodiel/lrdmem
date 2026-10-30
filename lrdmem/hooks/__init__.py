@@ -5,7 +5,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from lrdmem import config
+from lrdmem import config, consolidate, experience, revision, write
+from lrdmem.model import Evidence
 from lrdmem.checks import CheckResult, pending, problem, run_checks
 from lrdmem.lint import lint, printable
 from lrdmem.recall import recall, render
@@ -21,6 +22,9 @@ POST_EDIT_BUDGET = 8  # seconds for all post-edit checks; the post-tool hook is 
 EDIT_TIME_STOP_BUDGET = 4  # OpenCode's plugin kills a hook at 5 s; covers its post-edit and stop checks
 STOP_BUDGET = 300  # the Stop hook is killed at 330 s
 PULL_BUDGET = 3  # seconds for every session-start pull together; the context matters more than freshness
+CONSOLIDATE_BUDGET = 20  # seconds of consolidation at a non-blocking Stop, after the checks, before autopush
+EDIT_TIME_CONSOLIDATE_BUDGET = 3  # OpenCode's end of session: the plugin kills the hook at 5 s
+OUTPUT_LINES = 20  # check output kept in a check experience
 
 
 @dataclass
@@ -94,6 +98,39 @@ def _failures(r: CheckResult) -> str:
     return "\n".join(f"lrdmem check failed: {slug}\n{tail}" for slug, tail in r.failures)
 
 
+def _scope_name(store: Store, m) -> str:
+    env, repo = store.scope_of(m.path.parent)
+    return "repo" if repo else "env" if env else "global"
+
+
+def _record(inp: HookInput, s: _Scope, result: CheckResult) -> None:
+    """One `check` experience per check that ran (once per session, memory and result), as evidence on its memory:
+    a failure is observed_in 0.5; a pass after a failure in the same session supports 1.0. Errors never surface."""
+    sid = inp.session_id or "nosession"
+    for m, passed, tail, files in result.outcomes:
+        try:
+            verdict = "pass" if passed else "fail"
+            lines = "\n".join(tail.splitlines()[-OUTPUT_LINES:])
+            text = f"check {'passed' if passed else 'failed'}: {m.ref}\nfiles: {', '.join(files)}"
+            args = dict(kind="check", agent="hook", source="check", scope=_scope_name(s.store, m), files=files,
+                        request_id=f"{sid}:{m.ref}:{verdict}", device=s.cfg.get("device", ""), env=s.env)
+            try:
+                exp, created = experience.add(s.store, inp.cwd, text=text + ("\n\n" + lines if lines else ""),
+                                              **args)
+            except write.Refused:  # the output held something the store refuses (a secret): keep the fact only
+                exp, created = experience.add(s.store, inp.cwd, text=text, **args)
+            failed_before = any(e.request_id == f"{sid}:{m.ref}:fail" for e in s.store.experiences())
+            if not created or (passed and not failed_before):
+                continue
+            item = Evidence(exp.ref, "supports", 1.0) if passed else Evidence(exp.ref, "observed_in", 0.5)
+            folder = m.path.parent
+            if write.add_evidence(write.target(s.store, folder, m.path.name), item):
+                revision.record(s.store, folder, m.ref, "merge", {"evidence": ""}, {"evidence": exp.ref},
+                                f"check {verdict}", "hook")
+        except Exception:
+            continue  # a recording problem never breaks the hook
+
+
 def _session_start(inp: HookInput, s: _Scope) -> HookOutput:
     deadline = time.monotonic() + PULL_BUDGET
     for target in (s.env, "_global"):
@@ -123,6 +160,9 @@ def _session_start(inp: HookInput, s: _Scope) -> HookOutput:
         parts.append(f"{len(waiting) - broken} obligation(s) await approval: run `lrdmem allow`")
     if broken:
         parts.append(f"{broken} obligation(s) can't be approved: run `lrdmem allow` for details")
+    decisions = [q for q in consolidate.open_items(s.store) if s.store.scope_of(q.path.parent.parent)[0] in (None, s.env)]
+    if decisions:
+        parts.append(f"{len(decisions)} memory decision(s) pending: run `lrdmem consolidate --queue`")
     return HookOutput("\n\n".join(parts))
 
 
@@ -150,8 +190,11 @@ def _post_edit(inp: HookInput, s: _Scope) -> HookOutput:
         session.save()
     ons = ("post-edit", "stop") if inp.edit_time_stop else ("post-edit",)
     deadline = time.monotonic() + (EDIT_TIME_STOP_BUDGET if inp.edit_time_stop else POST_EDIT_BUDGET)
-    texts = [_failures(run_checks(s.store, s.env, s.repo, root, on, inp.paths, s.cfg,
-                                  budget=deadline - time.monotonic())) for on in ons]
+    texts = []
+    for on in ons:
+        r = run_checks(s.store, s.env, s.repo, root, on, inp.paths, s.cfg, budget=deadline - time.monotonic())
+        _record(inp, s, r)
+        texts.append(_failures(r))
     return HookOutput("\n".join(filter(None, texts)))
 
 
@@ -164,13 +207,18 @@ def _stop(inp: HookInput, s: _Scope) -> HookOutput:
     session = Session(inp.session_id)
     out = HookOutput()
     if root and session.edited and not inp.edit_time_stop:
-        text = _failures(run_checks(s.store, s.env, s.repo, root, "stop", session.edited, s.cfg,
-                                         budget=STOP_BUDGET))
+        r = run_checks(s.store, s.env, s.repo, root, "stop", session.edited, s.cfg, budget=STOP_BUDGET)
+        _record(inp, s, r)
+        text = _failures(r)
         if text and not inp.stop_active and session.stop_blocks < MAX_BLOCKS:
             session.stop_blocks += 1
             session.save()
             return HookOutput(block_reason=text)  # no sync: the agent is not done yet
         out = HookOutput(text)
+    try:
+        consolidate.run(s.store, budget=EDIT_TIME_CONSOLIDATE_BUDGET if inp.edit_time_stop else CONSOLIDATE_BUDGET)
+    except Exception:
+        pass  # consolidation is best effort; the next Stop finishes what is left
     for target in (s.env, "_global"):
         if autopush_enabled(s.cfg, target):
             sync(s.store, target, skip_idle=True)  # never raises for git problems: errors come back in the results
