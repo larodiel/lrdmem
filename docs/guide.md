@@ -11,7 +11,7 @@ lrdmem for FILE [--command CMD]                           # what a hook injects 
 lrdmem learn ... | learn-pr URL --agent NAME              # record corrections (active right away)
 lrdmem experience add --kind K --agent A TEXT             # record what happened (immutable)
 lrdmem associate [QUERY] [--file F]                       # memories related to a candidate, with signals
-lrdmem memory propose < payload.json                      # validated candidates from an experience
+lrdmem memory propose --agent me < payload.json          # validated candidates from an experience
 lrdmem feedback REF useful|incorrect|irrelevant           # signal on a recalled memory
 lrdmem consolidate [--queue | --resolve ITEM DECISION]    # automatic consolidation and the judgment queue
 lrdmem revert REVISION                                    # undo one recorded change

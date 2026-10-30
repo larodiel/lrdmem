@@ -66,7 +66,7 @@ lrdmem associate "drop column dependency migration" --file db/migrate.php
    hypotheses: never state a guessed cause as a fact.
 
 ```
-lrdmem memory propose <<'JSON'
+lrdmem memory propose --agent claude <<'JSON'
 {"experience": "work/app/experiences/2026-10-30-migration-failed",
  "candidates": [
   {"slug": "migration-failed-oct", "memory_type": "episodic", "scope": "repo",

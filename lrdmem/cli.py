@@ -73,7 +73,8 @@ def _show(store: Store, g: Graph, args) -> int:
     _out("Contexts:")
     for c in g.contexts_of(m):
         _out(f"  {_context_line(c)}")
-    _out(f"Related: {', '.join(g.related(m))}")
+    if related := g.related(m):
+        _out(f"Related: {', '.join(related)}")
     idx = evidence.Index(store)
     conf = evidence.confidence(store, evidence.memory_evidence(store, m, idx), idx)
     _out(f"type: {m.memory_type}  state: {m.state}  confidence: {conf:.2f}  "

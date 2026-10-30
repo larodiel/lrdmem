@@ -33,7 +33,9 @@ def build(changed: list[tuple[str, str]], device: str, env_label: str, root: Pat
     added_revs = [(p, *_revision(root, p)) for s, p in changed
                   if s[:1] in "AM" and PurePosixPath(p).parent.name == "revisions"]
     reverts = [PurePosixPath(p).stem for p, action, _ in added_revs if action == "revert"]
-    merge = sum(1 for _, a, _ in added_revs if a == "merge")
+    # a `merge` that adds an experience is new evidence, not a fusion of two memories
+    merge = sum(1 for _, a, after in added_revs
+                if a == "merge" and "/experiences/" not in str(after.get("evidence", "")))
     promote = sum(1 for _, a, after in added_revs if a == "state_change" and after.get("state") == "active")
     contest = sum(1 for _, a, after in added_revs if a == "state_change" and after.get("state") == "contested")
     consolidating = merge or promote or contest or any(a in ("supersede", "invalidate") for _, a, _ in added_revs)

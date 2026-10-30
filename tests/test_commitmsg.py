@@ -52,6 +52,12 @@ class BuildTest(unittest.TestCase):
         self.assertEqual(self.subject(msg), "feat(memory): learn 2 memories, 1 experiences")
         self.assertIn("1 edge", msg)
 
+    def test_evidence_added_is_learning_not_consolidation(self):
+        changed = [("A", "acme/web/rule.md"), ("A", "acme/web/experiences/e1.md"), ("M", "acme/web/x.md"),
+                   rev(self.root, "acme/web/revisions/r1.md", "merge", "evidence: acme/web/experiences/e1")]
+        self.assertEqual(self.subject(build(changed, "mac", "acme", self.root)),
+                         "feat(memory): learn 1 memories, 1 experiences")
+
     def test_chore_and_body_cap(self):
         changed = [("M", f"acme/web/m{i}.md") for i in range(40)]
         msg = build(changed, "Victor's Mac", "acme", self.root)
