@@ -1,6 +1,7 @@
 """Trigger matching: which memories apply to the file or command an agent is touching."""
 
 from fnmatch import fnmatchcase
+from itertools import product
 
 from lrdmem.store import Memory
 
@@ -16,10 +17,14 @@ def strs(value) -> list[str]:
 
 
 def glob_match(path: str, pattern: str) -> bool:
-    """True when path matches the glob; a leading `**/` also matches the root."""
-    if fnmatchcase(path, pattern):
-        return True
-    return pattern.startswith("**/") and fnmatchcase(path, pattern[3:])
+    """True when path matches the glob, where each `**/` matches zero or more folders (`src/**/*.php` also
+    matches `src/Main.php`, `**/*.php` also matches `Main.php`)."""
+    parts = pattern.split("**/")
+    # ponytail: tries all 2^(n-1) zero/some choices for n-1 `**/`; patterns rarely hold more than two
+    for keep in product((True, False), repeat=len(parts) - 1):
+        if fnmatchcase(path, parts[0] + "".join(("**/" if k else "") + p for k, p in zip(keep, parts[1:]))):
+            return True
+    return False
 
 
 def in_scope(memory: Memory, env: str, repo: str, env_wide: bool = False) -> bool:

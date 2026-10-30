@@ -143,7 +143,12 @@ def _git_root() -> Path | None:
 
 
 def _stale(store: Store, g: Graph, args) -> int:
-    found = stale(store, _git_root())
+    try:
+        scope = resolve(store, Path.cwd())
+    except AmbiguousRepo as e:
+        print(printable(str(e)), file=sys.stderr)
+        return 2
+    found = stale(store, _git_root(), scope)
     for m, path in found:
         _out(f"{_rel(store, m)}: {path}")
     return 1 if found else 0

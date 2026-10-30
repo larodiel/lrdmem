@@ -28,8 +28,17 @@ class StaleTest(unittest.TestCase):
         self.assertEqual([p for _, p in stale(self.store, None)], ["/Users/nope/x.php", "~/nope-dir/y"])
 
     def test_relative_with_repo_root(self):
-        found = [p for _, p in stale(self.store, self.tmp / "repo")]
+        found = [p for _, p in stale(self.store, self.tmp / "repo", ("work", "app"))]
         self.assertEqual(found, ["/Users/nope/x.php", "~/nope-dir/y", "src/gone.php", "gone.md"])
+
+    def test_relative_paths_only_for_the_repos_own_memories(self):
+        (self.root / "work/other").mkdir()
+        (self.root / "work/other/o.md").write_text(_mem("o", "See `src/only-there.php` and `/Users/nope/z`."))
+        found = [(m.slug, p) for m, p in stale(self.store, self.tmp / "repo", ("work", "app"))]
+        self.assertNotIn(("o", "src/only-there.php"), found)
+        self.assertIn(("o", "/Users/nope/z"), found)  # absolute paths hold for every memory
+        self.assertEqual([p for _, p in stale(self.store, self.tmp / "repo", None)],
+                         ["/Users/nope/x.php", "~/nope-dir/y", "/Users/nope/z"])  # repo not opted in
 
     def test_existing_absolute_not_flagged(self):
         f = self.tmp / "real.txt"

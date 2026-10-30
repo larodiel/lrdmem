@@ -96,6 +96,9 @@ class SyncTest(unittest.TestCase):
         [res] = sync(b)
         self.assertFalse(res.pushed)
         self.assertIn("work", res.error)
+        self.assertIn("conflict", res.error)
+        self.assertIn("git pull --rebase", res.error)  # the way out, since the rebase was aborted
+        self.assertNotIn("git rebase --abort", res.error)  # no raw git hints that no longer apply
         self.assertClean(b.root / "work")
         self.assertEqual(g(self.remote, "show", "main:f.md"), "from a\n")
         self.assertIsNotNone(pull(b, "work"))

@@ -152,10 +152,15 @@ def _pull(repo: Path, label: str, timeout: float | None = None) -> str | None:
     try:
         _git(repo, "pull", "--rebase", timeout=PULL_TIMEOUT if timeout is None else timeout)
     except _GitError as e:
+        conflict = _rebasing(repo)  # a rebase left in progress means conflicting changes, not a network error
         try:
             _git(repo, "rebase", "--abort")
         except _GitError:
             pass
+        if conflict:
+            return (f"conflict in {label}: this computer and the remote changed the same files; nothing pushed, "
+                    f"your commit is kept. Resolve it with: cd {repo} && git pull --rebase, fix the files, "
+                    "git add -A && git rebase --continue, then lrdmem sync")
         return f"pull failed in {label} (rebase aborted, nothing pushed): {e}"
     return None
 

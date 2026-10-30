@@ -8,7 +8,7 @@ from pathlib import Path
 
 from lrdmem.cli import main
 from lrdmem.store import Store
-from lrdmem.triggers import matches
+from lrdmem.triggers import glob_match, matches
 from tests.fixtures import make_store
 
 
@@ -21,6 +21,13 @@ PHP = "  paths: ['**/*.php']\n"
 
 
 class TriggersTest(unittest.TestCase):
+    def test_double_star_matches_zero_or_more_folders(self):
+        for path, pattern, want in (("src/Main.php", "src/**/*.php", True), ("src/a/b/Main.php", "src/**/*.php", True),
+                                    ("Main.php", "**/*.php", True), ("a/b/c.php", "a/**/b/**/c.php", True),
+                                    ("a/x/b/c.php", "a/**/b/**/c.php", True), ("lib/Main.php", "src/**/*.php", False),
+                                    ("src/Main.js", "src/**/*.php", False)):
+            self.assertEqual(glob_match(path, pattern), want, (path, pattern))
+
     def setUp(self):
         self._t = tempfile.TemporaryDirectory()
         self.tmp = Path(self._t.name)

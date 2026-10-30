@@ -362,11 +362,12 @@ does not pull or push one that has uncommitted changes outside the memory folder
 
 ### When two computers changed the same memory
 
-The pull stops and sync reports the conflict; nothing is pushed. Resolve it like any git conflict, then sync again:
+Sync stops before pushing anything, keeps your local commit, and backs out of the half-done pull, so the repo is
+left clean. It tells you which repository conflicted. Redo the pull by hand and resolve it like any git conflict:
 
 ```bash
 cd ~/agent-memory                     # or the environment repo sync named
-git status                            # the conflicting files
+git pull --rebase                     # stops at the conflicting files
 # edit them, keeping both sides' lines where you can; experiences never conflict, they are new files
 git add -A && git rebase --continue
 lrdmem sync
@@ -533,7 +534,8 @@ times support. These are the rules that keep being broken: candidates for an obl
 
 #### `lrdmem stale`
 
-Lists memories citing file paths that no longer exist in the current repo. Exits 1 when it finds any.
+Lists file paths in backticks that no longer exist: absolute ones (`~/…`, `/…`) in every memory, relative
+ones (`src/Foo.php`) only in the current repo's own memories. Exits 1 when it finds any.
 
 #### `lrdmem graph`
 
