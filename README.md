@@ -9,7 +9,8 @@
 ![Zero dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)
 ![License: MIT](https://img.shields.io/badge/license-MIT-black)
 
-[Website](https://larodiel.github.io/lrdmem/) · [Guide](docs/guide.md) · [Commands](#commands) ·
+[Website](https://larodiel.github.io/lrdmem/) · [Guide](docs/guide.md) ·
+[Environments and projects](#environments-and-projects) · [Commands](#commands) ·
 [Contributing](CONTRIBUTING.md)
 
 > **TL;DR**
@@ -121,11 +122,48 @@ lrdmem hot                     # rules that keep being broken
 lrdmem graph -o brain.html     # the whole map
 ```
 
-## How a project finds its memories
+## Environments and projects
+
+The store is one folder (usually a git repo) with three levels. There is no command to create them: they are plain
+folders, and lrdmem finds them on its own.
+
+| Level | Folder | What goes there | Seen from |
+|---|---|---|---|
+| You | `_global/` | facts and preferences about you | every project |
+| Environment | `<env>/_global/` | rules for every repo of a company, client or side of your life | every project of the environment |
+| Project | `<env>/<repo>/` | rules for one repository | that repository and all its worktrees |
+
+An **environment** is any top-level folder of the store, except `_global`, `bin` and names starting with `.` or `_`.
+Use one per context you keep apart: `work`, `personal`, a client. A **project** is a folder inside an environment,
+named after the repository.
+
+```text
+~/agent-memory/                  the store (lrdmem config set store ~/agent-memory)
+├── _global/
+│   └── MEMORY.md
+├── work/                        environment "work"
+│   ├── _global/MEMORY.md        rules for every work repo
+│   ├── shop-frontend/           project "shop-frontend"
+│   │   ├── MEMORY.md            index of the memories below
+│   │   ├── run-phpcs.md         a memory
+│   │   ├── experiences/         what happened, written once
+│   │   ├── edges/               typed relations between memories
+│   │   ├── revisions/           every change, revertible
+│   │   └── queue/               decisions consolidation left for you
+│   └── billing-service-api/
+└── personal -> ~/repos/personal-memory   environment "personal", its own git repo
+    ├── _global/MEMORY.md
+    └── lrdmem/
+```
+
+lrdmem creates `experiences/`, `edges/`, `revisions/` and `queue/` as it needs them. You only create the
+environment and project folders, each with an empty `MEMORY.md`.
+
+### How a project finds its memories
 
 There is nothing to configure per project. In any directory, lrdmem asks git for the main checkout
-(`git rev-parse --git-common-dir`) and uses its directory name as the repo key, so every worktree of a repo shares
-its memories:
+(`git rev-parse --git-common-dir`) and uses its directory name as the **repo key**, so every worktree of a repo
+shares its memories, whatever the worktree folder is called:
 
 ```text
 ~/sites/plugins/shop-frontend          (main checkout)  ┐
@@ -133,24 +171,63 @@ its memories:
 ~/sites/plugins/shop-frontend-cart     (worktree)       ┘
 ```
 
-It then looks for `<store>/<env>/shop-frontend/` in every environment (a top-level folder of the store) and reads
-three folders, broadest first:
+Then it looks for a folder with that name in every environment. With `work/shop-frontend/` in the store, an agent
+in any of those checkouts reads, broadest first:
 
-```text
-~/agent-memory/
-├── _global/                    facts about you, everywhere
-└── acme-co/                    an environment (its own git repo, or a folder of the store's repo)
-    ├── _global/                rules for every repo of the environment
-    └── shop-frontend/          rules for this repo
-        ├── *.md                memories
-        ├── experiences/        what happened, written once
-        ├── edges/              typed relations between memories
-        ├── revisions/          every change, revertible
-        └── queue/              decisions consolidation left for you
+1. `_global/`
+2. `work/_global/`
+3. `work/shop-frontend/`
+
+A repository with no folder in the store gets nothing: hooks stay quiet there, and commands need `--env`.
+
+### Add an environment
+
+As a folder of the store's own repo (synced with it):
+
+```bash
+mkdir -p ~/agent-memory/work/_global
+touch ~/agent-memory/work/_global/MEMORY.md
 ```
 
-A repo takes part only when its folder exists. If two environments hold a folder with the same name, commands ask
-for `--env` and hooks stay quiet. Two clones with the same directory name share memories.
+Or as its own git repo, to share it with a team or sync it apart from your personal memories, linked into the store:
+
+```bash
+git clone git@github.com:acme/agent-memory.git ~/repos/acme-memory
+ln -s ~/repos/acme-memory ~/agent-memory/acme
+```
+
+Each environment repo syncs on its own (`lrdmem sync acme`) and has its own autopush setting
+(`lrdmem config autopush on --env acme`).
+
+### Add a project
+
+Create a folder named after the repository's main checkout directory (what `basename` of the checkout prints), with
+an empty index:
+
+```bash
+mkdir -p ~/agent-memory/work/shop-frontend
+touch ~/agent-memory/work/shop-frontend/MEMORY.md
+```
+
+Check it from inside the repository or any of its worktrees:
+
+```bash
+cd ~/sites/plugins/shop-frontend-auth
+lrdmem for src/Main.php        # prints the memories a hook would inject; empty is fine for a new project
+lrdmem lint work               # checks the environment's folders and files
+```
+
+### Rules and pitfalls
+
+- **One name, one environment.** If two environments both have an `shop-frontend/` folder, commands stop and ask
+  for `--env`, and hooks inject nothing, rather than guess.
+- **Same name, same memories.** Two different clones that share a directory name (a fork, a second copy) share the
+  project folder. Rename the checkout to keep them apart.
+- **Reserved names.** `contexts`, `experiences`, `edges`, `revisions` and `queue` can't be project names.
+- **Where `learn` writes.** `--scope repo` writes to the current project's folder, `--scope env` to
+  `<env>/_global/` (pass `--repos` to say which repos it applies to), `--scope global` to `_global/`.
+- **Don't move a project folder once it has memories.** Evidence and relations refer to store paths such as
+  `work/shop-frontend/experiences/…`; moving the folder breaks them (`lrdmem lint` lists every broken ref).
 
 ## Commands
 
