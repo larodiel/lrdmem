@@ -217,6 +217,39 @@ lrdmem for src/Main.php        # prints the memories a hook would inject; empty 
 lrdmem lint work               # checks the environment's folders and files
 ```
 
+### More than one store
+
+lrdmem reads **one store at a time**. To keep memories apart (work, personal, clients, a team), you usually don't
+need a second store: make each one an environment of the same store, with its own git repo linked in.
+
+```text
+~/agent-memory/                           the one store
+├── _global/                              about you
+├── personal -> ~/repos/my-memory         your repo
+├── acme-co  -> ~/repos/acme-co-memory    a team repo, shared with colleagues
+└── client-x -> ~/repos/client-x-memory   a client's repo
+```
+
+Each linked repo then behaves like a store of its own:
+
+- its own remote and collaborators: share `acme-co` with the team without sharing `personal`;
+- its own sync (`lrdmem sync acme-co`) and autopush (`lrdmem config autopush on --env acme-co`);
+- full isolation between environments: a project sees only its own environment plus `_global/`, so nothing from
+  `client-x` reaches a `acme-co` project.
+
+When you do want a completely separate store, such as a sandbox to try lrdmem on a copy, set `LRDMEM_STORE`. It
+overrides `lrdmem config set store` for every process that inherits it:
+
+```bash
+LRDMEM_STORE=~/memory-sandbox lrdmem recall "deploy"   # one command
+export LRDMEM_STORE=~/memory-sandbox                   # this shell, and agents started from it
+```
+
+Hooks see the variable only when the harness was started from that shell. Two stores never combine: a session
+reads one or the other. The device config (approvals, autopush, device name) is shared by every store, and an
+approval is keyed by the memory's store-relative path and the exact command text, so it carries over to another
+store only for an identical command at an identical path.
+
 ### Rules and pitfalls
 
 - **One name, one environment.** If two environments both have an `shop-frontend/` folder, commands stop and ask
