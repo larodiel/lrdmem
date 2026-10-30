@@ -1,0 +1,11 @@
+#!/bin/sh
+# lrdmem plugin hook launcher: lrdmem-hook <phase> <agent>
+#
+# Hands one hook event to the installed lrdmem CLI, which owns all hook logic. Without the CLI it drains stdin
+# and exits 0, so the agent is never blocked. Set LRDMEM_BIN when lrdmem is not on PATH.
+bin="${LRDMEM_BIN:-lrdmem}"
+if ! command -v "$bin" >/dev/null 2>&1; then
+    cat >/dev/null
+    exit 0
+fi
+exec "$bin" hook "$1" --agent "$2"

@@ -1,0 +1,12 @@
+{
+  "name": "lrdmem",
+  "description": "Shared, git-backed memory for coding agents: injects the rules that apply to the file or command at hand, runs approved checks, and records corrections. Requires the lrdmem CLI (pipx install lrdmem) and a configured store (lrdmem config set store <path>). Nothing leaves your machine except your own git pushes. Codex runs the hooks only after you trust them in /hooks.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Victor Larodiel",
+    "url": "https://github.com/larodiel"
+  },
+  "homepage": "https://larodiel.github.io/lrdmem/",
+  "repository": "https://github.com/larodiel/lrdmem",
+  "license": "MIT"
+}

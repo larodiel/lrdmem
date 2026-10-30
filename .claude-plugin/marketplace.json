@@ -1,0 +1,16 @@
+{
+  "name": "lrdmem",
+  "owner": {
+    "name": "Victor Larodiel",
+    "url": "https://github.com/larodiel"
+  },
+  "description": "lrdmem: shared, git-backed memory for Claude Code, Codex and OpenCode.",
+  "plugins": [
+    {
+      "name": "lrdmem",
+      "description": "Shared memory across agents and devices.",
+      "version": "0.1.0",
+      "source": "./plugins/claude-code"
+    }
+  ]
+}

@@ -5,9 +5,11 @@ Instructions for AI coding agents working on the lrdmem repository. Humans: see 
 ## What this is
 
 A stdlib-only Python 3.11+ CLI (`lrdmem`), a skill (`lrdmem/skill/SKILL.md`) and harness hooks that give Claude Code,
-Codex and OpenCode one git-backed memory store. Memories are Markdown files with a small YAML-subset frontmatter;
-contexts (`<folder>/contexts/*.md`) record the incidents behind them. Design: `docs/specs/2026-10-28-lrdmem-design.md`.
-Reference: `docs/guide.md`.
+Codex and OpenCode one git-backed memory store, shipped as a PyPI package plus Claude Code and Codex plugins.
+Memories are Markdown files with a small YAML-subset frontmatter; experiences (`<folder>/experiences/*.md`, legacy
+`contexts/`) record what happened, immutably; edges, revisions and the judgment queue live beside them. Design:
+`docs/specs/2026-10-28-lrdmem-design.md` and `docs/specs/2026-10-29-lrdmem-v2-memory-model-design.md`. Reference:
+`README.md#commands` (every command and option) and `docs/guide.md`.
 
 ## Commands
 
@@ -40,6 +42,9 @@ actionlint .github/workflows/*.yml                       # after editing workflo
 | `hooks/` | harness-neutral `handle()` + `claude`, `codex`, `opencode` adapters and the OpenCode JS plugin |
 | `install.py` | merging hooks into harness configs, installing the skill |
 | `cli.py` | argparse wiring only |
+| `plugins/claude-code`, `plugins/codex` | harness plugins: `hooks/hooks.json` (from `install._EVENTS`), a launcher calling `lrdmem hook`, a copy of the skill |
+| `.claude-plugin/`, `.agents/plugins/` | plugin marketplaces for `claude plugin` and `codex plugin` |
+| `site/` | the GitHub Pages site, one static `index.html`, deployed by `.github/workflows/pages.yml` |
 
 ## Rules
 
@@ -52,6 +57,12 @@ actionlint .github/workflows/*.yml                       # after editing workflo
 - **Reuse before you write.** Each concern has one home (see the map); call it instead of duplicating logic.
 - **Private by default.** `_helpers`; public names get a docstring. CLI flags, hook JSON and the file format are
   public API.
+- **Keep the copies in step.** A CLI command or flag change updates `README.md#commands` (`test_cli` fails on any
+  undocumented flag). A hook event change in `install._EVENTS` or a skill edit regenerates both plugins and their
+  version follows `lrdmem.__version__` (`test_plugins` fails otherwise). Commands or features shown on `site/`
+  must match the README.
+- **Dot-directories are tracked on purpose.** `.claude-plugin/`, `.codex-plugin/` and `.agents/` are unignored in
+  `.gitignore`; check `git status` shows new files in them before you report done.
 - **Don't commit, push, tag or open PRs unless the human asks.**
 
 ## Reserved names

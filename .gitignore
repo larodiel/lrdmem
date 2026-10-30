@@ -4,3 +4,7 @@ __pycache__/
 dist/
 build/
 .venv/
+# plugin manifests are dot-directories; keep them tracked even under a global `.*` ignore
+!.claude-plugin/
+!.codex-plugin/
+!.agents/

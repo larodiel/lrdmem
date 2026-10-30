@@ -1,0 +1,22 @@
+{
+  "name": "lrdmem",
+  "interface": {
+    "displayName": "lrdmem"
+  },
+  "plugins": [
+    {
+      "name": "lrdmem",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/larodiel/lrdmem.git",
+        "path": "plugins/codex",
+        "ref": "main"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

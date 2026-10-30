@@ -46,6 +46,32 @@ class CliTest(unittest.TestCase):
                        "recall", "consolidate", "feedback", "memory propose", "experience add"):
             self.assertIn(needle, text)
 
+    def test_readme_documents_every_command_and_option(self):
+        import argparse
+        from pathlib import Path
+        from unittest import mock
+        readme = (Path(__file__).parent.parent / "README.md").read_text()
+        grabbed = {}
+
+        def grab(parser, *args, **kwargs):
+            grabbed.setdefault("p", parser)
+            raise SystemExit(0)
+
+        with mock.patch.object(argparse.ArgumentParser, "parse_args", grab), self.assertRaises(SystemExit):
+            main(["--help"])
+        todo = [("lrdmem", grabbed["p"])]
+        while todo:
+            prefix, parser = todo.pop()
+            for action in parser._actions:
+                if isinstance(action, argparse._SubParsersAction):
+                    todo += [(f"{prefix} {name}", sub) for name, sub in action.choices.items()]
+                    continue
+                if prefix != "lrdmem":
+                    self.assertTrue(f"`{prefix}" in readme, f"README lacks a section for {prefix}")
+                for flag in action.option_strings:
+                    if flag not in ("-h", "--help"):
+                        self.assertTrue(flag in readme, f"README lacks {prefix} {flag}")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -523,8 +523,11 @@ def _main(argv: list[str] | None) -> int:
     parser.add_argument("--version", action="version", version=f"lrdmem {__version__}")
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("lint", help="check the store for problems").add_argument("env", nargs="?")
-    for name, fn in (("find", _find), ("show", _show), ("why", _why), ("hot", _hot)):
-        p = sub.add_parser(name, help=f"{name} memories")
+    for name, fn, text in (("find", _find, "search memories and experiences by keyword"),
+                           ("show", _show, "show a memory with its evidence, relations and revisions"),
+                           ("why", _why, "the experiences and revisions behind a memory, oldest first"),
+                           ("hot", _hot, "memories reinforced most often: candidate obligations")):
+        p = sub.add_parser(name, help=text)
         p.set_defaults(fn=fn)
         if name == "find":
             p.add_argument("term")

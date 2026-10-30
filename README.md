@@ -7,6 +7,9 @@
 ![Zero dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)
 ![License: MIT](https://img.shields.io/badge/license-MIT-black)
 
+[Website](https://larodiel.github.io/lrdmem/) · [Guide](docs/guide.md) · [Commands](#commands) ·
+[Contributing](CONTRIBUTING.md)
+
 > **TL;DR**
 > - You correct an agent once → the lesson goes into a git repo you own.
 > - Claude Code, Codex and OpenCode read it on every machine, right when they touch the file it's about.
@@ -23,60 +26,351 @@ lrdmem is a shared memory for AI coding agents. When you correct an agent, the l
 you own. Claude Code, Codex and OpenCode all read from it, on every device, and the right lesson shows up at the
 moment the agent touches the file it applies to.
 
-```bash
-pipx install lrdmem
-lrdmem config set store ~/agent-memory      # any git repo you own
-lrdmem install --agent claude                # and/or codex, opencode
-```
-
-## Why it works when instructions files don't
+## Why it works when instruction files don't
 
 Agents mostly follow what's in their context. The problem is what's *not* in it, and what fades: in long sessions,
 adherence to rules drops with every function the agent writes, and stuffing everything into one always-on file
-costs tokens and success rate. lrdmem is built around three ideas:
+costs tokens and success rate. lrdmem is built around four ideas:
 
 1. **Right memory, right moment.** Memories carry triggers (file globs, commands, repos). When the agent is about to
    edit `src/Service.php`, it gets the PHP rules, not your whole rulebook.
 2. **Obligations are checks, not advice.** "Always run phpcs" becomes a command the hook runs for the agent, and a
    failure blocks the end of the task. The agent can't forget what it doesn't have to remember.
-3. **Every rule remembers why.** Each correction is stored as a *context*, a neuron linked to the memory it
-   reinforces: what went wrong, what you said, which repo, which agent, when. The rule that keeps coming back
-   rises to the top of `lrdmem hot` and becomes a candidate obligation.
+3. **Every rule remembers why.** What happened (an error, a correction, a review comment, a check run) is stored as
+   an *experience*, written once and never edited. Memories point at the experiences that support or refute them.
+4. **It learns like a person, not like a log.** Repeating yourself is not evidence. A candidate becomes an active
+   rule only with support from independent agents, devices or days; refuted rules get contested; a guessed cause
+   stays a hypothesis until something confirms it.
 
 ```mermaid
 flowchart LR
-    C1["context: forgot phpcs<br/>codex · 10-21"] --> M["memory: phpcs-before-done<br/>kind: obligation"]
-    C2["context: forgot phpcs<br/>claude · 10-24"] --> M
-    C3["context: PR review #128"] --> M
+    E1["experience: forgot phpcs<br/>codex · 10-21"] -->|supports| M["memory: phpcs-before-done<br/>procedural · active"]
+    E2["experience: forgot phpcs<br/>claude · 10-24"] -->|supports| M
+    E3["experience: PR review #128"] -->|supports| M
     M -->|post-edit / stop hook| R["vendor/bin/phpcs src/Service.php"]
-    M -. "[[link]]" .-> M2["memory: tabs-in-php"]
+    M -. related_to .-> M2["memory: tabs-in-php"]
+    H["hypothesis: phpcs cache is stale"] -. derived_from .-> E1
 ```
 
 ## What you get
 
-- **One store, three harnesses.** Claude Code, Codex CLI and OpenCode run the same hooks through one entry point.
-- **Learns from chat and from PR reviews.** The bundled skill teaches agents to record corrections with
-  `lrdmem learn`; `lrdmem learn-pr <url>` turns your review comments into contexts.
-- **A brain you can query.** `find`, `show`, `why` (the timeline of mistakes behind a rule), `hot`, `stale`, and
-  `graph` to an HTML, JSON or DOT map of memories and their contexts.
+- **One store, three harnesses.** Claude Code, Codex CLI and OpenCode run the same hooks through one entry point,
+  as a plugin or wired by `lrdmem install`.
+- **Learns from chat, PR reviews and check runs.** The bundled skill teaches agents to record corrections with
+  `lrdmem learn`; `lrdmem learn-pr <url>` turns your review comments into experiences; hooks record every
+  obligation check that passes or fails.
+- **A memory model, not a notes folder.** Six memory types (episodic, semantic, procedural, hypothesis, prospective,
+  metacognitive), five states (candidate, active, contested, superseded, obsolete), typed relations and a revision
+  for every change, all computed from evidence.
+- **A brain you can query.** `recall`, `associate`, `find`, `show`, `why` (the timeline behind a rule), `hot`,
+  `stale`, and `graph` to an HTML, JSON or DOT map.
 - **Plain Markdown in git.** Every memory is a file you can read, edit, review and revert. `[[links]]` between
-  memories work in Obsidian too.
+  memories work in Obsidian too. Every automatic commit follows Conventional Commits.
 - **Scoped by environment.** Keep `work/` and `personal/` apart, each its own repo, shareable on its own.
   Company-wide rules live in `<env>/_global/`; facts about you in `_global/`.
 - **Sync your way.** `lrdmem sync` when you want, or autopush per device and per environment.
 - **Zero dependencies.** Python 3.11+ standard library only. Hooks answer in about 100 ms.
+
+## Install
+
+lrdmem is a CLI plus hooks and a skill for each harness. Install the CLI once per machine, point it at your store,
+then connect your agents.
+
+```bash
+pipx install lrdmem                          # or: uv tool install lrdmem · brew install larodiel/tap/lrdmem
+lrdmem config set store ~/agent-memory       # any git repo you own
+lrdmem config set device notebook            # a name for this machine, used in experiences and commits
+```
+
+Connect each agent with **either** its plugin **or** `lrdmem install`, not both (both would run every hook twice).
+
+| Harness | Plugin | Without the plugin |
+|---|---|---|
+| Claude Code | `claude plugin marketplace add larodiel/lrdmem && claude plugin install lrdmem@lrdmem` | `lrdmem install --agent claude` |
+| Codex | `codex plugin marketplace add larodiel/lrdmem && codex plugin add lrdmem@lrdmem`, then trust the hooks in `/hooks` | `lrdmem install --agent codex` |
+| OpenCode | (no marketplace) | `lrdmem install --agent opencode` |
+
+The plugins carry the hooks and the skill and call the installed `lrdmem` CLI (set `LRDMEM_BIN` when it is not on
+`PATH`); without the CLI they stay silent and never block the agent. `lrdmem install` writes the same hooks into
+`~/.claude/settings.json` or `~/.codex/hooks.json`, copies the OpenCode plugin to
+`~/.config/opencode/plugins/lrdmem.js`, and installs the skill. Run it with `--dry-run` first to see every change.
+
+## Quick start
+
+```bash
+git init ~/agent-memory && mkdir -p ~/agent-memory/{_global,work/my-app}
+touch ~/agent-memory/{_global,work/my-app}/MEMORY.md
+lrdmem config set store ~/agent-memory
+lrdmem install --agent claude --dry-run   # see exactly what changes
+lrdmem install --agent claude
+```
+
+Then just work. When you correct the agent, it records the lesson; you can do it yourself too:
+
+```bash
+lrdmem learn --scope repo --agent me --memory php-tabs \
+  --mistake "indented with spaces" --correction "we use tabs" \
+  --description "PHP is indented with tabs" --body "Indent PHP with tabs." \
+  --why "house style" --how "check editor settings for *.php" --paths '**/*.php'
+
+lrdmem for src/Service.php     # what an agent sees before editing this file
+lrdmem why php-tabs            # every experience behind the rule
+lrdmem hot                     # rules that keep being broken
+lrdmem graph -o brain.html     # the whole map
+```
+
+## How a project finds its memories
+
+There is nothing to configure per project. In any directory, lrdmem asks git for the main checkout
+(`git rev-parse --git-common-dir`) and uses its directory name as the repo key, so every worktree of a repo shares
+its memories:
+
+```text
+~/sites/plugins/shop-frontend          (main checkout)  ┐
+~/sites/plugins/shop-frontend-auth     (worktree)       ├─> repo key: shop-frontend
+~/sites/plugins/shop-frontend-cart     (worktree)       ┘
+```
+
+It then looks for `<store>/<env>/shop-frontend/` in every environment (a top-level folder of the store) and reads
+three folders, broadest first:
+
+```text
+~/agent-memory/
+├── _global/                    facts about you, everywhere
+└── acme-co/                    an environment (its own git repo, or a folder of the store's repo)
+    ├── _global/                rules for every repo of the environment
+    └── shop-frontend/          rules for this repo
+        ├── *.md                memories
+        ├── experiences/        what happened, written once
+        ├── edges/              typed relations between memories
+        ├── revisions/          every change, revertible
+        └── queue/              decisions consolidation left for you
+```
+
+A repo takes part only when its folder exists. If two environments hold a folder with the same name, commands ask
+for `--env` and hooks stay quiet. Two clones with the same directory name share memories.
+
+## Commands
+
+Every command reads the store from `$LRDMEM_STORE` or `lrdmem config set store`. `--env` picks an environment when
+a name is ambiguous or you are outside the repo; `--agent` is who acts (`claude`, `codex`, `opencode`, your name),
+recorded in experiences and revisions. `lrdmem --version` prints the version; `lrdmem <command> --help` prints the
+options of any command.
+
+### Setup
+
+#### `lrdmem config set`
+
+`lrdmem config set store <path>` points this device at a store; `lrdmem config set device <name>` names the device
+(experiences and commit messages carry it; two devices count as independent evidence).
+
+#### `lrdmem config autopush`
+
+`lrdmem config autopush on|off [--env ENV]`: let hooks commit and push the store at the end of a task, for one
+environment or all. Off by default.
+
+#### `lrdmem config show`
+
+Prints this device's configuration as JSON.
+
+#### `lrdmem install`
+
+`lrdmem install --agent claude|codex|opencode [--dry-run]`: wires lrdmem's hooks (or the OpenCode plugin) and the
+skill into the harness's user config. It validates every file before writing, backs up what it edits, replaces only
+hooks it owns, and with `--dry-run` prints the plan and writes nothing.
+
+### Recording what happened
+
+#### `lrdmem learn`
+
+Records a correction from the user (chat or PR review) as an experience and links it to a memory, creating the
+memory when it is new. A correction is active immediately.
+
+| Option | What it does |
+|---|---|
+| `--memory SLUG` | the memory it reinforces or creates (required) |
+| `--mistake TEXT`, `--correction TEXT` | what went wrong and what the user said (required) |
+| `--scope repo\|env\|global` | where the memory lives: this repo, every repo of the environment, or about you (required) |
+| `--agent NAME` | who made the mistake (required) |
+| `--source chat\|pr`, `--pr URL` | where the correction came from |
+| `--files F...` | files involved |
+| `--kind obligation\|pattern\|fact` | the memory's kind; `obligation` can carry a check |
+| `--description`, `--body`, `--why`, `--how` | the new memory's text (required for a new memory) |
+| `--paths`, `--commands`, `--repos` | triggers: globs, command prefixes, repos (repeat or comma-separate; env scope needs `--repos`) |
+| `--new` | create it even when similar memories exist (otherwise learn refuses and lists them) |
+| `--env ENV` | the environment, when not inferable |
+
+#### `lrdmem learn-pr`
+
+`lrdmem learn-pr <url> --agent NAME [--env ENV]`: reads a GitHub PR's review comments (through `gh`) and links each
+to the memories it reinforces. Only comments from owners, members and collaborators count, and only on PRs of the
+checkout's own GitHub remotes.
+
+#### `lrdmem experience add`
+
+Records one experience: something that happened, written once and never edited. Pass the text as an argument, or a
+JSON object on stdin.
+
+| Option | What it does |
+|---|---|
+| `--kind` | error, decision, discovery, outcome, execution, correction, review, feedback or check |
+| `--agent NAME` | who observed it |
+| `--scope repo\|env\|global` | where it is stored (default: this repo) |
+| `--files F` | files involved (repeat or comma-separate) |
+| `--source chat\|pr\|run\|check`, `--ref REF` | where it came from, and a link (PR URL, run id) |
+| `--request-id ID` | makes retries safe: the same id never records twice |
+| `--env ENV` | the environment, when not inferable |
+
+#### `lrdmem memory propose`
+
+`lrdmem memory propose --agent NAME [--env ENV]` reads a JSON payload on stdin: an experience and the candidate
+memories extracted from it, each classified as `new`, `equivalent` (adds evidence to `relates_to`), `complementary`
+(new, plus a proposed relation), `contradicts` or `insufficient` (stays a hypothesis). It validates every
+candidate, refuses secrets and cross-repo references, and writes candidates, evidence, relations and revisions.
+The skill has a full example.
+
+#### `lrdmem feedback`
+
+`lrdmem feedback <memory> useful|incorrect|irrelevant [--note TEXT] [--agent NAME]`: reports how a recalled memory
+did. Feedback is a signal for consolidation, never proof: one negative never deletes or demotes a memory.
+
+### Looking things up
+
+#### `lrdmem recall`
+
+The memories most relevant to a task, scored by keywords (accent-aware BM25), triggers, file and command entities,
+relations and evidence, with the reason each was recalled. Active memories first; candidates and hypotheses are
+labelled as not confirmed.
+
+| Option | What it does |
+|---|---|
+| `QUERY` | free text (optional) |
+| `--file F`, `--command C` | the file or command at hand (repeat `--file`) |
+| `--types T,T` | only these memory types |
+| `--states S,S` | only these states, or `all` |
+| `--limit N` | at most N memories (default 10) |
+| `--hops N` | follow relations up to N hops (default 2) |
+| `--budget N` | output size budget in characters (default 1500) |
+| `--json` | machine-readable output |
+| `--env ENV` | the environment |
+
+#### `lrdmem associate`
+
+`lrdmem associate [QUERY] [--file F] [--command C] [--limit N] [--json] [--env ENV]`: lists memories associated
+with a text, file or command, with their signals. Agents run it before proposing candidates, to tell what is new.
+
+#### `lrdmem for`
+
+`lrdmem for [FILE] [--command C] [--session ID] [--env ENV]`: prints exactly what a hook injects for a file or
+command. With `--session`, memories already injected in that session are skipped, as hooks do.
+
+#### `lrdmem find`
+
+`lrdmem find <term> [--env ENV]`: searches memories and experiences by keyword, with each memory's support count and
+related memories.
+
+#### `lrdmem show`
+
+`lrdmem show <slug> [--env ENV]`: a memory with its body, type, state, confidence, priority, evidence, relations and
+number of revisions.
+
+#### `lrdmem why`
+
+`lrdmem why <slug> [--env ENV]`: the experiences behind a memory, oldest first, then its revisions.
+
+#### `lrdmem hot`
+
+`lrdmem hot [--min N]`: memories reinforced by at least N independent experiences (default 3), ranked by confidence
+times support. These are the rules that keep being broken: candidates for an obligation with a check.
+
+#### `lrdmem stale`
+
+Lists memories citing file paths that no longer exist in the current repo. Exits 1 when it finds any.
+
+#### `lrdmem graph`
+
+`lrdmem graph [--format html|json|dot] [-o/--output FILE]`: exports memories, experiences and typed relations as an
+interactive HTML page (default), JSON or Graphviz DOT, to stdout or a file.
+
+#### `lrdmem lint`
+
+`lrdmem lint [ENV]`: checks the store: frontmatter, slugs, `MEMORY.md` indexes, evidence and relation refs,
+secrets, cited paths, and experiences edited after their first commit. Exits 1 on problems.
+
+### Lifecycle
+
+#### `lrdmem consolidate`
+
+Runs consolidation now (hooks also run it at the end of every task): marks expired memories obsolete, merges exact
+duplicates, promotes candidates with at least two independent supports, contests refuted memories and restores
+them when support returns, validates relations, and queues what needs judgment. Idempotent; stops at the budget
+and resumes on the next run.
+
+| Option | What it does |
+|---|---|
+| `--budget SECONDS` | time budget (default 20) |
+| `--json` | machine-readable result |
+| `--queue` | list the open decisions instead of running |
+| `--resolve ITEM DECISION` | decide a queue item: `merge`/`keep-separate`, `promote`/`reject`, `create`/`reject` |
+| `--into REF` | the memory a `promote` or `create` decision points to |
+| `--note TEXT`, `--agent NAME` | why, and who decided |
+
+#### `lrdmem revert`
+
+`lrdmem revert <revision> [--agent NAME]`: restores what one revision changed and records a `revert` revision. The
+revision must belong to a memory visible from where it was recorded.
+
+### Obligations
+
+#### `lrdmem allow`
+
+`lrdmem allow [SLUG] [--env ENV]`: approves a memory's `check.run` command on this device. Without a slug, lists
+commands waiting for approval. Approval is by the exact text's hash: change one character and it needs approval
+again. Only approve commands you have read.
+
+#### `lrdmem check`
+
+`lrdmem check --on post-edit|stop [--files F...] [--env ENV]`: runs the approved checks of obligations whose
+triggers match the files. Hooks call it after edits and at the end of a task; a failure at `stop` blocks the end of
+the task.
+
+### Sync
+
+#### `lrdmem sync`
+
+`lrdmem sync [ENV]`: pulls, commits and pushes the store, every environment repo or one. Never force-pushes, never
+autostashes, and stops on conflicts. Commit messages follow Conventional Commits (`feat(memory): learn 2
+memories, 1 experiences`, `refactor(memory): consolidate — merge 1, promote 2, contest 0`).
+
+### Harness entry points
+
+#### `lrdmem hook`
+
+`lrdmem hook <phase> [--agent claude|codex|opencode]`: what the plugins and installed hooks run. Reads the harness's
+JSON on stdin and answers in its format. Phases: `session-start` (pull where autopush is on; the `MEMORY.md`
+indexes in scope, lint problems, commands awaiting approval, pending decisions), `pre-tool` (memories for the file
+or command), `post-tool` (post-edit checks), `prompt` (a reminder to record corrections), `stop` (stop checks,
+consolidation, autopush). Never fails the agent, except a stop check that blocks.
+
+#### `lrdmem context`
+
+`lrdmem context [--agent NAME]`: same as `hook session-start`; kept for setups wired to the older `bin/memory
+context`.
 
 ## Safe by default
 
 A memory store that agents and colleagues write to, and hooks that run commands, is an attack surface. lrdmem treats
 it as one:
 
-- **Commands run only after you approve their exact text** on this device (`lrdmem allow`, stored by hash). Edit one
-  character and it needs approval again. File names reach the command as arguments, never spliced into a shell
-  string, and non-ASCII commands can't be approved at all.
+- **No secrets in memory, ever.** Every write goes through one guard that refuses passwords, API keys, tokens and
+  private keys, also when they are JSON-escaped, and `lint` flags any that arrive through git.
+- **Commands run only after you approve their exact text** on this device (`lrdmem allow`, stored by hash). File
+  names reach the command as arguments, never spliced into a shell string, and non-ASCII commands can't be
+  approved at all.
 - **PR comments are only learned from owners, members and collaborators**, and only for PRs of the checkout's own
   GitHub remotes.
-- **No secrets in memory.** `learn` and `lint` refuse credential-shaped text.
+- **Store content is untrusted.** Git runs on it with hooks, fsmonitor and submodules disabled, and repositories
+  planted inside the store are refused.
 - **No surprise pushes.** Hooks commit and push only where you turned autopush on; sync never force-pushes,
   never autostashes, and stops on conflicts.
 - **Memory is reference data, not instructions.** Injected context tells the agent so, and terminal output is
@@ -91,45 +385,17 @@ it as one:
 | Synced across devices | ✅ your git | your git | their cloud | ❌ |
 | Injected only when relevant | ✅ triggers | ❌ always loaded | ✅ similarity | varies |
 | Enforces rules with checks | ✅ | ❌ | ❌ | ❌ |
-| Keeps the *why* of each rule | ✅ contexts | ❌ | partial | ❌ |
-| Reviewable, revertible history | ✅ git | ✅ git | ❌ | ❌ |
+| Keeps the *why* of each rule | ✅ experiences | ❌ | partial | ❌ |
+| Evidence-based promotion | ✅ | ❌ | varies | ❌ |
+| Reviewable, revertible history | ✅ git + revisions | ✅ git | ❌ | ❌ |
 | Runs offline, no server | ✅ | ✅ | ❌ | ✅ |
-
-## Quick start
-
-```bash
-pipx install lrdmem                        # or: uv tool install lrdmem · brew install larodiel/tap/lrdmem
-
-git init ~/agent-memory && mkdir -p ~/agent-memory/{_global,work/my-app}
-touch ~/agent-memory/{_global,work/my-app}/MEMORY.md
-lrdmem config set store ~/agent-memory
-
-lrdmem install --agent claude --dry-run   # see exactly what changes
-lrdmem install --agent claude             # also: --agent codex, --agent opencode
-```
-
-A repo takes part when the store has a folder for it (`work/my-app/` above, named after the repo's directory). Then
-just work. When you correct the agent, it records the lesson; you can do it yourself too:
-
-```bash
-lrdmem learn --scope repo --agent me --memory php-tabs \
-  --mistake "indented with spaces" --correction "we use tabs" \
-  --description "PHP is indented with tabs" --body "Indent PHP with tabs." \
-  --why "house style" --how "check editor settings for *.php" --paths '**/*.php'
-
-lrdmem for src/Service.php     # what an agent sees before editing this file
-lrdmem why php-tabs            # every incident behind the rule
-lrdmem hot                     # rules that keep being broken
-lrdmem graph -o brain.html     # the whole map
-```
-
-To enforce a rule, make it an obligation with a `check` and approve it once with `lrdmem allow`. See the
-[guide](docs/guide.md#obligations).
 
 ## Documentation
 
-- [Guide](docs/guide.md): commands, obligations, sync, store layout, harness details, migrating from `bin/memory`.
-- [Design](docs/specs/2026-10-28-lrdmem-design.md): goals, non-goals and the research behind them.
+- [Guide](docs/guide.md): memory model, lifecycle, obligations, sync, store layout, harness details, migrating from
+  `bin/memory`.
+- [Design](docs/specs/2026-10-28-lrdmem-design.md) and [memory model](docs/specs/2026-10-29-lrdmem-v2-memory-model-design.md):
+  goals, non-goals and the research behind them.
 - [Contributing](CONTRIBUTING.md) · [Agent instructions](AGENTS.md)
 
 ## Background
