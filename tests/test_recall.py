@@ -75,9 +75,13 @@ class RecallTest(unittest.TestCase):
     def test_validity_window(self):
         s = self.store({"work/app/exp.md": _mem("exp", valid_until="2026-10-28"),
                         "work/app/fut.md": _mem("fut", valid_from="2026-10-30"),
-                        "work/app/ok.md": _mem("ok", valid_from="2026-10-29", valid_until="2026-10-29")})
-        self.assertEqual(self.refs(recall(s, "work", "app", files=["a.php"], now=NOW)), ["work/app/ok"])
-        self.assertEqual(self.refs(recall(s, "work", "app", files=["a.php"], states="all", now=NOW)), ["work/app/ok"])
+                        "work/app/ok.md": _mem("ok", valid_from="2026-10-29", valid_until="2026-10-29"),
+                        "work/app/bad.md": _mem("bad", valid_from="'2026-11-31'", valid_until="soon"),
+                        "work/app/lex.md": _mem("lex", valid_until="2026-1-5")})
+        self.assertEqual(self.refs(recall(s, "work", "app", files=["a.php"], now=NOW)),
+                         ["work/app/bad", "work/app/lex", "work/app/ok"])
+        self.assertEqual(self.refs(recall(s, "work", "app", files=["a.php"], states="all", now=NOW)),
+                         ["work/app/bad", "work/app/lex", "work/app/ok"])
 
     def test_two_hop_neighbour_and_relations(self):
         s = self.store({"work/app/a.md": _mem("a", "alpha migration", trig=""),
@@ -90,8 +94,9 @@ class RecallTest(unittest.TestCase):
         self.assertEqual(hits[2].signals, ["2 hops via caused_by"])
         self.assertEqual(self.refs(recall(s, "work", "app", query="migration", hops=0, now=NOW)), ["work/app/a"])
         text = render(hits)
-        self.assertIn("Why recalled: 2 hops via caused_by\nRelations: caused_by → work/app/b (validated)", text)
-        self.assertIn("Relations: supports → work/app/a (validated); caused_by → work/app/c (validated)", text)
+        self.assertIn("Why recalled: 2 hops via caused_by\nRelations: caused_by → work/app/b (validated, active)", text)
+        self.assertIn("Relations: supports → work/app/a (validated, active); caused_by → work/app/c (validated, active)",
+                      text)
 
     def test_relations_validated_first_max_five(self):
         files = {"work/app/a.md": _mem("a", "alpha", trig="")}
@@ -105,6 +110,68 @@ class RecallTest(unittest.TestCase):
         self.assertEqual(len(rel), 5)
         self.assertEqual([r["state"] for r in rel], ["validated"] * 4 + ["proposed"])
         self.assertNotIn("contradicts", [r["type"] for r in rel])
+
+    def test_relation_targets_in_hook_and_explicit(self):
+        s = self.store({"work/app/a.md": _mem("a", "alpha [[c]] [[h]] [[o]] [[x]]"),
+                        "work/app/c.md": _mem("c", trig="", state="candidate"),
+                        "work/app/h.md": _mem("h", trig="", memory_type="hypothesis", state="candidate"),
+                        "work/app/o.md": _mem("o", trig="", state="obsolete"),
+                        "work/app/x.md": _mem("x", trig="", state="contested"),
+                        "work/app/experiences/e1.md": "---\nid: e1\ndate: 2026-10-01\nkind: error\nagent: a\n---\nx\n",
+                        "work/app/edges/oc.md": _edge("oc", "work/app/a", "work/app/experiences/e1", "occurred_in")})
+        hook = to_json(recall(s, "work", "app", files=["a.php"], for_hook=True, now=NOW))[0]["relations"]
+        self.assertEqual(sorted((r["target"], r["target_state"]) for r in hook),
+                         [("work/app/experiences/e1", "experience"), ("work/app/x", "contested")])
+        explicit = recall(s, "work", "app", files=["a.php"], hops=0, now=NOW)
+        self.assertEqual(len(to_json(explicit)[0]["relations"]), 5)
+        self.assertIn("related_to → work/app/h (validated, candidate)", render(explicit))
+
+    def test_scope_isolation(self):
+        s = self.store({"_global/g.md": _mem("g", "global [[secret]]"),
+                        "work/other/secret.md": _mem("secret", "OTHER REPO"),
+                        "work/app/mine.md": _mem("mine", "mine"),
+                        "work2/app/x.md": _mem("x", "OTHER ENV"),
+                        "work/other/edges/e1.md": _edge("e1", "_global/g", "work/other/secret", "caused_by"),
+                        "work/app/edges/e2.md": _edge("e2", "work/app/mine", "work/other/secret", "caused_by"),
+                        "work/app/edges/e3.md": _edge("e3", "work/app/mine", "work2/app/x", "related_to")})
+        both = ["_global/g", "work/app/mine"]
+        for kw, want in ((dict(files=["a.php"], for_hook=True), both),
+                         (dict(query="other repo env secret", states="all", hops=5), ["_global/g"]),
+                         (dict(files=["a.php"], states="all", hops=5), both)):
+            hits = recall(s, "work", "app", now=NOW, **kw)
+            self.assertEqual(sorted(self.refs(hits)), want)
+            text = render(hits) + json.dumps(to_json(hits))
+            for leak in ("work/other", "work2", "OTHER"):
+                self.assertNotIn(leak, text)
+
+    def test_store_reads_constant_and_top_k_scored(self):
+        def build(n):
+            tmp = self.tmp / f"s{n}"
+            tmp.mkdir()
+            files = {f"work/app/m{i}.md": _mem(f"m{i}", f"rule {i} [[m{(i + 1) % n}]]") for i in range(n)}
+            files.update({f"work/app/contexts/2026-01-01-c{i}.md":
+                          f"---\nid: c{i}\ndate: 2026-01-01\nsource: chat\nagent: a{i}\nmemories: [m{i}]\n---\nx\n"
+                          for i in range(n)})
+            return Store(make_store(tmp, files))
+
+        def reads(store, **kw):
+            calls = {}
+            for name in ("memories", "contexts", "node"):
+                real = getattr(Store, name)
+                calls[name] = mock.patch.object(Store, name, autospec=True, side_effect=real)
+            with calls["memories"] as m, calls["contexts"] as c, calls["node"] as nd, \
+                    mock.patch("lrdmem.recall.confidence", wraps=__import__("lrdmem.evidence").evidence.confidence) as conf:
+                hits = recall(store, "work", "app", files=["a.php"], now=NOW, **kw)
+            return len(hits), m.call_count, c.call_count, nd.call_count, conf.call_count
+
+        small, big = build(3), build(60)
+        for kw, most in ((dict(for_hook=True), 2), (dict(budget=99999), 3)):
+            a, b = reads(small, **kw), reads(big, **kw)
+            self.assertEqual(a[1:4], b[1:4], kw)
+            self.assertLessEqual(b[1], most)
+            self.assertLessEqual(b[2], 2)
+            self.assertEqual(b[0], 10)
+            self.assertLessEqual(b[4], 30)  # confidence only for the top max(limit * 3, 30)
 
     def test_empty_no_match_and_cycle(self):
         self.assertEqual(recall(self.store({}), "work", "app", query="x", files=["a.php"], now=NOW), [])
@@ -229,6 +296,11 @@ class RecallCliTest(unittest.TestCase):
         self.assertEqual(json.loads(out), [])
         code, out = self.run_cli("recall", "--file", "x.php", "--states", "all", "--limit", "1", "--json")
         self.assertEqual([d["id"] for d in json.loads(out)], ["work/app/r"])
+
+    def test_negative_hops_refused(self):
+        with mock.patch("sys.stderr", io.StringIO()), self.assertRaises(SystemExit) as e:
+            main(["recall", "x", "--hops", "-1"])
+        self.assertEqual(e.exception.code, 2)
 
     def test_for_is_hook_recall_with_session(self):
         code, out = self.run_cli("for", "migration.php", "--session", "s1")

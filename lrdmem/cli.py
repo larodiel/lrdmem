@@ -128,6 +128,13 @@ def _positive(text: str) -> int:
     return n
 
 
+def _natural(text: str) -> int:
+    n = int(text)
+    if n < 0:
+        raise argparse.ArgumentTypeError("must be a non-negative integer")
+    return n
+
+
 def _associate(store: Store, g: Graph, args) -> int:
     try:
         scope = resolve(store, Path.cwd(), args.env)
@@ -489,7 +496,7 @@ def _main(argv: list[str] | None) -> int:
     p.add_argument("--types", action="append", help="memory types (comma-separated)")
     p.add_argument("--states", action="append", help="memory states (comma-separated), or all")
     p.add_argument("--limit", type=_positive, default=10)
-    p.add_argument("--hops", type=int, default=2)
+    p.add_argument("--hops", type=_natural, default=2)
     p.add_argument("--budget", type=_positive, default=1500)
     p.add_argument("--json", action="store_true")
     p.add_argument("--env")

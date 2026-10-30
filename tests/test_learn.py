@@ -3,7 +3,7 @@ import subprocess
 import tempfile
 import threading
 import unittest
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -13,7 +13,8 @@ from lrdmem.learn import LearnRefused, learn
 from lrdmem.store import Store
 from tests.fixtures import make_store
 
-TODAY = date.today().isoformat()
+TODAY = date.today().isoformat()  # learn touches `updated` with the local date
+UTC_TODAY = datetime.now(timezone.utc).date().isoformat()  # experiences (contexts) are named by UTC day
 KW = dict(mistake="used tabs", correction="use spaces", scope="repo", agent="claude")
 NEW = dict(KW, description="Indent with spaces always", body="Indent with spaces.", why="style.", how="spaces.")
 
@@ -53,7 +54,7 @@ class LearnTest(unittest.TestCase):
         self.learn(memory="spaces", **NEW)
         r = self.learn(memory="spaces", **KW)
         self.assertFalse(r.created)
-        self.assertTrue(r.context.name.startswith(TODAY) and r.context.name.endswith("-2.md"), r.context.name)
+        self.assertTrue(r.context.name.startswith(UTC_TODAY) and r.context.name.endswith("-2.md"), r.context.name)
         self.assertEqual(parse(r.context.read_text())["id"], r.context.stem)
         self.assertEqual((self.root / "acme/web/MEMORY.md").read_text().count("spaces.md"), 1)
         self.assertEqual(Graph(self.store).strength("spaces", "acme"), 2)

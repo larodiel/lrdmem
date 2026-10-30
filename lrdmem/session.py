@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 class Session:
-    """Injected slugs, edited files and Stop-block count for one agent session."""
+    """Injected memory refs, edited files and Stop-block count for one agent session."""
 
     def __init__(self, id: str = ""):
         self.id = id

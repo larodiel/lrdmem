@@ -206,6 +206,16 @@ class ClaudeHookTest(_Base):
         self.assertEqual(self.hook("pre-tool", self.payload("pre_tool_edit")), "")
         self.assertNotEqual(self.hook("pre-tool", self.payload("pre_tool_edit", session_id="s2")), "")
 
+    def test_pre_edit_relations_show_only_injectable_targets(self):
+        m = "---\nname: {0}\ndescription: d\nmetadata:\n  type: feedback\n{1}---\n{2}\n"
+        self.store({"work/app/rel.md": m.format("rel", "triggers:\n  paths: ['**/*.php']\n", "Rel [[cand]] [[act]]"),
+                    "work/app/cand.md": m.format("cand", "  state: candidate\n", "unconfirmed"),
+                    "work/app/act.md": m.format("act", "", "confirmed")})
+        text = json.loads(self.hook("pre-tool", self.payload("pre_tool_edit")))["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("Rel [[cand]] [[act]]\nWhy recalled: file trigger **/*.php\n"
+                      "Relations: related_to → work/app/act (validated, active)\n", text)
+        self.assertNotIn("work/app/cand", text)
+
     def test_notebook_path_and_relative_subdir_cwd(self):
         self.store()
         (self.repo / "src").mkdir()

@@ -2,6 +2,7 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 from lrdmem import evidence
 from lrdmem.model import Evidence
@@ -169,6 +170,33 @@ class EvidenceTest(unittest.TestCase):
         self.assertAlmostEqual(self.prio(st, "m"), 0.64)  # f1, f2 only (verdict field only)
         self.assertEqual(self.prio(st, "n"), 1.0)  # 1.2 clamped
         self.assertAlmostEqual(self.prio(st, "o"), 0.12)  # boost applies under the cap
+
+    def test_index_matches_store_reads_and_makes_no_store_reads(self):
+        ctx = "---\nid: {0}\ndate: 2026-10-2{1}\nagent: a{1}\nsource: chat\nmemories: [{2}]\n---\n\nx\n"
+        st = self.build(exp("o", kind="outcome"), exp("f", kind="feedback", extra="verdict: irrelevant\n", agent="b"),
+                        self.with_ev("m", [(S + "o", "supports", 1), (S + "f", "observed_in", 0), ("nope", "refutes", 1)],
+                                     memory_type="episodic", created="2026-07-01"),
+                        ("_global/g.md", mem("g")[1]), ("_global/m.md", mem("m")[1]),
+                        ("acme/web/contexts/c1.md", ctx.format("c1", 1, "m, m")),
+                        ("acme/web/contexts/c2.md", ctx.format("c2", 2, "g")))
+        mems = [st.node("acme/web/m"), st.node("_global/g"), st.node("_global/m")]
+
+        def run(index):
+            out = []
+            for m in mems:
+                items = evidence.memory_evidence(st, m, index)
+                out.append((items, evidence.confidence(st, items, index), evidence.has_outcome(st, items, index),
+                            evidence.priority(st, m, NOW, CFG, index),
+                            [evidence.independence_key(st, e, index) for e in items]))
+            return out
+
+        plain = run(None)
+        index = evidence.Index(st)
+        boom = mock.Mock(side_effect=AssertionError("store read with an index"))
+        with mock.patch.multiple(Store, memories=boom, contexts=boom, experiences=boom, node=boom):
+            self.assertEqual(run(index), plain)
+        self.assertEqual([len(p[0]) for p in plain], [4, 1, 0])  # c1 once although it names m twice
+        self.assertTrue(plain[0][2])
 
     def test_lazy_config_default(self):
         st = self.build(mem("s"))

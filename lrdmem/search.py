@@ -119,14 +119,17 @@ def candidates(store: Store, env: str, repo: str, *, query: str = "", files: Seq
     return sorted(hits.values(), key=lambda h: (-h.score, h.node.ref))[:limit]
 
 
-def expand(store: Store, hits: list[Hit], hops: int = 2, limit: int = 20, *, env: str, repo: str) -> list[Hit]:
+def expand(store: Store, hits: list[Hit], hops: int = 2, limit: int = 20, *, env: str, repo: str,
+           graph: Graph | None = None) -> list[Hit]:
     """Hits plus their visible graph neighbours up to `hops`, breadth first; proposed edges count half.
 
-    A neighbour scores parent x edge weight x 0.5; each memory appears once, at its nearest distance.
+    A neighbour scores parent x edge weight x 0.5; each memory appears once, at its nearest distance. Pass the
+    store's `graph` when you already built one, to skip re-reading the store.
     """
-    nodes = {m.ref: m for m in _visible(store, env, repo)}
+    graph = graph or Graph(store)
+    nodes = {m.ref: m for m in graph.memories() if visible(m, env, repo)}
     adj: dict[str, list[tuple[str, str, float]]] = {}
-    for e in Graph(store).typed_edges():
+    for e in graph.typed_edges():
         if e.state in _WEIGHT:
             adj.setdefault(e.source, []).append((e.target, e.type, _WEIGHT[e.state]))
             adj.setdefault(e.target, []).append((e.source, e.type, _WEIGHT[e.state]))

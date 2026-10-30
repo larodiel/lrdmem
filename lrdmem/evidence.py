@@ -22,7 +22,27 @@ def _clamp(x: float) -> float:
     return max(0.0, min(1.0, x))
 
 
-def _experience(store: Store, ref: str) -> Experience | None:
+class Index:
+    """One pass over a store's memories, contexts and experiences, so per-memory evidence lookups are dict hits.
+
+    Build it once per recall or consolidation; it is a snapshot, so rebuild it after writing to the store.
+    """
+
+    def __init__(self, store: Store, memories: list | None = None):
+        self.memories = store.memories() if memories is None else memories
+        self.own = {(m.env, m.slug) for m in self.memories}
+        self.experiences: dict[str, Experience] = {}
+        self.contexts: dict[str, list[Experience]] = {}
+        for e in store.experiences():
+            self.experiences.setdefault(e.ref, e)
+            if e.path.parent.name == "contexts":
+                for slug in dict.fromkeys(e.memories):
+                    self.contexts.setdefault(slug, []).append(e)
+
+
+def _experience(store: Store, ref: str, index: Index | None = None) -> Experience | None:
+    if index is not None:
+        return index.experiences.get(ref)
     node = store.node(ref)
     return node if isinstance(node, Experience) else None
 
@@ -38,12 +58,12 @@ def _when(exp: Experience) -> datetime | None:
         return None
 
 
-def independence_key(store: Store, ev: Evidence) -> tuple:
+def independence_key(store: Store, ev: Evidence, index: Index | None = None) -> tuple:
     """`(agent, device, YYYY-MM-DD)` of the referenced experience; any other or unresolvable ref gives `(ref,)`.
 
     Agent and device are stripped and lowercased; the date is the UTC calendar day of the experience.
     """
-    exp = _experience(store, ev.ref)
+    exp = _experience(store, ev.ref, index)
     if exp is None:
         return (ev.ref,)
     when = _when(exp)
@@ -51,7 +71,7 @@ def independence_key(store: Store, ev: Evidence) -> tuple:
     return (exp.agent.strip().lower(), exp.device.strip().lower(), day)
 
 
-def confidence(store: Store, items: list[Evidence]) -> float:
+def confidence(store: Store, items: list[Evidence], index: Index | None = None) -> float:
     """Confidence in [0, 1] from evidence: `clamp(0, 1, 1 - exp(-(S - R)))`.
 
     Only evidence that resolves to an experience counts; any other ref (unresolvable, memory, edge, URL) adds
@@ -62,9 +82,9 @@ def confidence(store: Store, items: list[Evidence]) -> float:
     pos: dict[tuple, float] = {}
     neg: dict[tuple, float] = {}
     for ev in items:
-        if _experience(store, ev.ref) is None:
+        if _experience(store, ev.ref, index) is None:
             continue
-        k = independence_key(store, ev)
+        k = independence_key(store, ev, index)
         if ev.kind == "refutes":
             neg[k] = max(neg.get(k, 0.0), ev.weight)
         elif ev.kind in ("supports", "observed_in"):
@@ -72,7 +92,7 @@ def confidence(store: Store, items: list[Evidence]) -> float:
     return _clamp(1 - math.exp(-(sum(pos.values()) - sum(neg.values()))))
 
 
-def memory_evidence(store: Store, memory) -> list[Evidence]:
+def memory_evidence(store: Store, memory, index: Index | None = None) -> list[Evidence]:
     """A memory's evidence list plus, as `supports` weight 1.0, each v0.1 context naming it in `memories:`.
 
     A context names the memory when it lives in the memory's env, or the memory is `_global` and the context's env has
@@ -80,18 +100,22 @@ def memory_evidence(store: Store, memory) -> list[Evidence]:
     """
     items = list(memory.evidence)
     have = {e.ref for e in items}
-    own = {(m.env, m.slug) for m in store.memories()}
-    for c in store.contexts():
-        if memory.slug in c.memories and c.ref not in have and (
+    if index is None:
+        own = {(m.env, m.slug) for m in store.memories()}
+        contexts = [c for c in store.contexts() if memory.slug in c.memories]
+    else:
+        own, contexts = index.own, index.contexts.get(memory.slug, [])
+    for c in contexts:
+        if c.ref not in have and (
                 c.env == memory.env or (memory.env is None and (c.env, memory.slug) not in own)):
             items.append(Evidence(c.ref, "supports", 1.0))
     return items
 
 
-def has_outcome(store: Store, items: list[Evidence]) -> bool:
+def has_outcome(store: Store, items: list[Evidence], index: Index | None = None) -> bool:
     """True when a `supports` item references an experience of kind `outcome` or `check`."""
     for ev in items:
-        exp = _experience(store, ev.ref) if ev.kind == "supports" else None
+        exp = _experience(store, ev.ref, index) if ev.kind == "supports" else None
         if exp and exp.kind in ("outcome", "check"):
             return True
     return False
@@ -103,7 +127,8 @@ def _irrelevant(exp: Experience) -> bool:
     return exp.kind == "feedback" and isinstance(verdict, str) and verdict.strip().lower() == "irrelevant"
 
 
-def priority(store: Store, node, now: datetime | None = None, cfg: dict | None = None) -> float:
+def priority(store: Store, node, now: datetime | None = None, cfg: dict | None = None,
+             index: Index | None = None) -> float:
     """Priority in [0, 1] of a memory, computed on read.
 
     Base 1.0; episodic/prospective memories decay by `0.5 ** (age / half_life_days)` (config, default 90; age from
@@ -131,7 +156,7 @@ def priority(store: Store, node, now: datetime | None = None, cfg: dict | None =
     supported = False
     seen = set()
     for ev in getattr(node, "evidence", []):
-        exp = _experience(store, ev.ref)
+        exp = _experience(store, ev.ref, index)
         when = _when(exp) if exp else None
         if when is None or ev.ref in seen or not 0 <= (now - when).total_seconds() <= _RECENT.total_seconds():
             continue
