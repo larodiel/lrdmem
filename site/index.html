@@ -62,7 +62,7 @@ nav .wrap { display: flex; align-items: center; gap: 20px; height: 60px; }
 /* hero */
 .hero { padding: 80px 0 64px; border-top: 0; }
 .hero-grid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 48px; align-items: center; }
-.hero-grid > *, .split > * { min-width: 0; }
+.hero-grid > *, .split > *, .grid2 > *, .grid3 > *, .steps > *, .cmds > * { min-width: 0; }
 @media (max-width: 900px) { .hero-grid { grid-template-columns: 1fr; } }
 .cta { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 28px; }
 .btn { display: inline-flex; align-items: center; gap: 8px; padding: 11px 18px; border-radius: 10px; font-weight: 600; border: 1px solid var(--line); color: var(--text); background: var(--surface); }
@@ -141,6 +141,36 @@ th.us, td.us { background: var(--accent-soft); }
 .checks li strong { color: var(--text); }
 .checks li::before { content: "✓"; position: absolute; left: 0; top: 0; color: var(--ok); font-weight: 700; }
 
+/* badges */
+.badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+.badge { font: 600 0.75rem/1 var(--mono); letter-spacing: 0.04em; padding: 6px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: var(--surface); }
+.badge b { color: var(--accent); font-weight: 700; }
+
+/* problem */
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 32px; }
+@media (max-width: 760px) { .grid2 { grid-template-columns: 1fr; } }
+.num { font: 700 0.8rem var(--mono); color: var(--accent); display: block; margin-bottom: 10px; }
+.files { margin: 14px 0 0; padding: 0; list-style: none; font: 0.82rem var(--mono); }
+.files li { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-top: 1px dashed var(--line); color: var(--muted); }
+.files li span:first-child { color: var(--text); }
+.stat { margin-top: 16px; font: 700 1.5rem var(--sans); letter-spacing: -0.02em; }
+.stat small { display: block; font: 500 0.82rem var(--sans); color: var(--muted); letter-spacing: 0; }
+
+/* sync */
+.card ol { margin: 12px 0 0; padding-left: 20px; color: var(--muted); font-size: 0.93rem; }
+.card ol li { margin-bottom: 6px; }
+.card .code { margin-top: 14px; }
+.card .code pre { font-size: 0.78rem; padding: 14px 16px; }
+
+/* faq */
+.faq { margin-top: 28px; border-top: 1px solid var(--line); }
+.faq details { border-bottom: 1px solid var(--line); padding: 4px 0; }
+.faq summary { cursor: pointer; list-style: none; padding: 14px 28px 14px 0; font-weight: 600; position: relative; }
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary::after { content: "+"; position: absolute; right: 4px; top: 12px; font: 400 1.3rem var(--mono); color: var(--accent); }
+.faq details[open] summary::after { content: "−"; }
+.faq details p { margin: 0 0 16px; color: var(--muted); max-width: 760px; }
+
 .closing { text-align: center; }
 .closing .lede { margin: 0 auto; }
 .closing .cta { justify-content: center; }
@@ -158,6 +188,7 @@ footer a { color: var(--muted); }
       <a class="hide-sm" href="#how">How it works</a>
       <a class="hide-sm" href="#install">Install</a>
       <a class="hide-sm" href="#commands">Commands</a>
+      <a class="hide-sm" href="#faq">FAQ</a>
       <a href="https://github.com/larodiel/lrdmem">GitHub</a>
       <button class="theme" id="theme" type="button" aria-label="Switch colour theme">Auto</button>
     </div>
@@ -177,6 +208,10 @@ footer a { color: var(--muted); }
         <a class="btn" href="https://github.com/larodiel/lrdmem">View on GitHub</a>
       </div>
       <div class="oneliner" aria-label="Quick install"><span class="p">$</span><span>pipx install lrdmem &amp;&amp; lrdmem config set store ~/agent-memory &amp;&amp; lrdmem install --agent claude</span></div>
+      <div class="badges" aria-label="Facts">
+        <span class="badge"><b>0</b> dependencies</span><span class="badge"><b>100%</b> local</span>
+        <span class="badge">MIT</span><span class="badge">Claude Code · Codex · OpenCode</span>
+      </div>
     </div>
     <div class="term" role="img" aria-label="Example: lrdmem injecting a memory before an agent edits a PHP file">
       <div class="term-bar"><b></b><b></b><b></b></div>
@@ -197,6 +232,28 @@ Why recalled: <span class="c-w">file trigger **/*.php</span>
     </div>
   </div>
 </header>
+
+<section id="problem">
+  <div class="wrap">
+    <div class="eyebrow">The problem</div>
+    <h2>Every agent remembers alone</h2>
+    <p class="lede">Each agent keeps its lessons in its own file, on one machine. So you repeat the same correction per
+      agent and per computer, and the files grow into rulebooks loaded on every request.</p>
+    <div class="grid2">
+      <div class="card"><span class="num">01</span><h3>One memory per tool</h3>
+        <p>Nothing an agent learns reaches the others.</p>
+        <ul class="files">
+          <li><span>Claude Code</span><span>CLAUDE.md · ~/.claude/…/memory</span></li>
+          <li><span>Codex</span><span>AGENTS.md · ~/.codex/AGENTS.md</span></li>
+          <li><span>OpenCode</span><span>AGENTS.md · ~/.config/opencode</span></li>
+        </ul></div>
+      <div class="card"><span class="num">02</span><h3>One memory per machine</h3>
+        <p>Your laptop's agent has no idea what your desktop's agent learned yesterday, and nothing records why a
+          rule exists or whether it still holds.</p>
+        <div class="stat">3 agents × 2 machines<small>six places to teach the same lesson, none of them sure when to apply it</small></div></div>
+    </div>
+  </div>
+</section>
 
 <section id="how">
   <div class="wrap">
@@ -309,6 +366,28 @@ lrdmem install --agent opencode</pre></div>
   </div>
 </section>
 
+<section id="sync">
+  <div class="wrap">
+    <div class="eyebrow">Sync across machines</div>
+    <h2>It's git, so it travels</h2>
+    <p class="lede">Every computer works on its own clone. lrdmem pulls at session start and pushes at the end of a
+      task, or whenever you run <code>lrdmem sync</code>.</p>
+    <div class="grid2">
+      <div class="card"><span class="num">01</span><h3>Track it in a private repo</h3>
+        <div class="code"><button class="copy" type="button">Copy</button><pre>cd ~/agent-memory
+git remote add origin git@github.com:you/agent-memory.git
+lrdmem config set device desktop
+lrdmem sync</pre></div></div>
+      <div class="card"><span class="num">02</span><h3>Clone it on the next machine</h3>
+        <div class="code"><button class="copy" type="button">Copy</button><pre>git clone git@github.com:you/agent-memory.git ~/agent-memory
+lrdmem config set store ~/agent-memory
+lrdmem config set device notebook
+lrdmem config autopush on</pre></div></div>
+    </div>
+    <p class="note">Evidence from two machines counts as independent, which is what promotes a lesson to an active rule. Approved check commands never travel: each computer approves its own.</p>
+  </div>
+</section>
+
 <section id="commands">
   <div class="wrap">
     <div class="eyebrow">Commands</div>
@@ -370,6 +449,21 @@ lrdmem install --agent opencode</pre></div>
         <tr><td>Runs offline, no server</td><td class="us y">Yes</td><td class="n">Yes</td><td class="n">No</td><td class="n">Yes</td></tr>
       </tbody>
     </table></div>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap">
+    <div class="eyebrow">FAQ</div>
+    <h2>Questions</h2>
+    <div class="faq">
+      <details><summary>Does anything leave my machine?</summary><p>Only what you push with git, to remotes you chose. No server, no account, no telemetry. Hooks never push unless you turn autopush on.</p></details>
+      <details><summary>Does it cost anything or call a model?</summary><p>No. lrdmem runs no model: consolidation, search and recall are plain code over files. The agents you already use write and read the memories.</p></details>
+      <details><summary>I already have CLAUDE.md and AGENTS.md. Do I drop them?</summary><p>No. Keep project setup and always-true instructions there. Move the lessons that apply to some files or commands into lrdmem, where they show up only when they matter and keep the history of why.</p></details>
+      <details><summary>Can my team share memories?</summary><p>Yes. Make the team's environment its own git repo and link it into each person's store. Check commands from a shared memory still run only after each person approves them on their own computer.</p></details>
+      <details><summary>What if an agent writes something wrong?</summary><p>Memories an agent proposes start as candidates and need independent evidence to become active. Feedback flags bad ones, consolidation contests refuted ones, and lrdmem revert undoes any recorded change.</p></details>
+      <details><summary>What if lrdmem isn't installed where the hooks are?</summary><p>The hooks find no CLI and stay silent. The agent is never blocked.</p></details>
+    </div>
   </div>
 </section>
 

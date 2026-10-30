@@ -9,7 +9,7 @@
 ![Zero dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)
 ![License: MIT](https://img.shields.io/badge/license-MIT-black)
 
-[Website](https://larodiel.github.io/lrdmem/) · [Guide](docs/guide.md) ·
+[Website](https://larodiel.github.io/lrdmem/) · [Guide](docs/guide.md) · [FAQ](#faq) ·
 [Environments and projects](#environments-and-projects) · [Sync](#sync-between-computers) ·
 [Commands](#commands) ·
 [Contributing](CONTRIBUTING.md)
@@ -29,6 +29,20 @@ and your laptop's agent has no idea what your desktop's agent learned yesterday.
 lrdmem is a shared memory for AI coding agents. When you correct an agent, the lesson goes into a git repository
 you own. Claude Code, Codex and OpenCode all read from it, on every device, and the right lesson shows up at the
 moment the agent touches the file it applies to.
+
+## The problem
+
+Every agent keeps its own memory, in its own file, on one machine:
+
+| Agent | Where its memory lives | Seen by the others? | On your other computer? |
+|---|---|---|---|
+| Claude Code | `CLAUDE.md`, `~/.claude/CLAUDE.md`, `~/.claude/projects/*/memory/` | ❌ | ❌ |
+| Codex | `AGENTS.md`, `~/.codex/AGENTS.md` | ❌ | ❌ |
+| OpenCode | `AGENTS.md`, `~/.config/opencode/AGENTS.md` | ❌ | ❌ |
+
+So the same correction gets repeated per agent and per machine, the files grow into rulebooks loaded on every
+request whether they apply or not, and nothing records *why* a rule exists or whether it still holds. lrdmem keeps
+one memory for all of them, in a git repo you own, and shows each lesson only where it applies.
 
 ## Why it works when instruction files don't
 
@@ -98,6 +112,21 @@ The plugins carry the hooks and the skill and call the installed `lrdmem` CLI (s
 `PATH`); without the CLI they stay silent and never block the agent. `lrdmem install` writes the same hooks into
 `~/.claude/settings.json` or `~/.codex/hooks.json`, copies the OpenCode plugin to
 `~/.config/opencode/plugins/lrdmem.js`, and installs the skill. Run it with `--dry-run` first to see every change.
+
+### Supported agents
+
+| Agent | Plugin | `lrdmem install` | Session start | Before edits and commands | After edits | End of task |
+|---|---|---|---|---|---|---|
+| Claude Code | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Codex | ✅ (trust hooks in `/hooks`) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| OpenCode | — | ✅ (JS plugin) | ✅ | ✅ | ✅ | ✅ |
+
+### Requirements
+
+- Python 3.11 or newer (standard library only, no packages)
+- git, for the store and for sync
+- [GitHub CLI](https://cli.github.com/) (`gh`), only for `lrdmem learn-pr`
+- macOS or Linux (hooks call a POSIX shell)
 
 ## Quick start
 
@@ -340,6 +369,26 @@ a name is ambiguous or you are outside the repo; `--agent` is who acts (`claude`
 recorded in experiences and revisions. `lrdmem --version` prints the version; `lrdmem <command> --help` prints the
 options of any command.
 
+### At a glance
+
+| Group | Command | What it does |
+|---|---|---|
+| Setup | `config set` · `config autopush` · `config show` | point at the store, name the device, turn autopush on or off |
+| | `install` | wire hooks and the skill into Claude Code, Codex or OpenCode |
+| Record | `learn` | a correction from the user, active right away |
+| | `learn-pr` | review comments from a GitHub PR |
+| | `experience add` | something that happened, written once |
+| | `memory propose` | candidate memories extracted from an experience |
+| | `feedback` | a recalled memory was useful, incorrect or irrelevant |
+| Look up | `recall` · `associate` · `for` | what applies to a task, file or command, and why |
+| | `find` · `show` · `why` | search, read a memory, see its history |
+| | `hot` · `stale` · `graph` · `lint` | repeated lessons, dead paths, the map, store checks |
+| Lifecycle | `consolidate` | promote, contest, merge, and decide queued judgments |
+| | `revert` | undo one recorded change |
+| Obligations | `allow` · `check` | approve check commands, run them |
+| Sync | `sync` | pull, commit and push the store |
+| Harness | `hook` · `context` | what the plugins and installed hooks call |
+
 ### Setup
 
 #### `lrdmem config set`
@@ -572,6 +621,42 @@ it as one:
 | Evidence-based promotion | ✅ | ❌ | varies | ❌ |
 | Reviewable, revertible history | ✅ git + revisions | ✅ git | ❌ | ❌ |
 | Runs offline, no server | ✅ | ✅ | ❌ | ✅ |
+
+## FAQ
+
+**Does anything leave my machine?**
+Only what you push with git, to remotes you chose. No server, no account, no telemetry. Hooks run locally and never
+push unless you turned autopush on.
+
+**Does it cost anything or call a model?**
+No. lrdmem runs no model. Consolidation, search and recall are plain code over files; the agents you already use
+write and read the memories.
+
+**I already have `CLAUDE.md` and `AGENTS.md`. Do I drop them?**
+No. Keep project setup and always-true instructions there. Move the lessons that apply to some files or commands
+into lrdmem, where they show up only when they matter and keep the history of why.
+
+**How is this different from a hosted memory service?**
+The memory is plain Markdown in your git repo: readable, reviewable, revertible, shareable by giving someone access
+to a repo. Recall is by keywords, file paths and triggers, not embeddings, so it is predictable and offline.
+
+**Can my team share memories?**
+Yes. Make the team's environment its own git repo, linked into each person's store (see
+[More than one store](#more-than-one-store)). Commands from a shared memory still run only after each person
+approves them on their own computer.
+
+**What happens if lrdmem isn't installed on a machine where the hooks are?**
+The hooks find no CLI and stay silent; the agent is never blocked.
+
+**What if an agent writes something wrong?**
+Memories an agent proposes on its own start as candidates and need independent evidence to become active;
+only your corrections are active right away. `lrdmem feedback` flags a bad
+one, consolidation contests refuted ones, and `lrdmem revert` undoes any recorded change. It's all git, too.
+
+**How do I remove it?**
+Uninstall the plugin (`claude plugin uninstall lrdmem@lrdmem`), or restore the backup `lrdmem install` made
+(`~/.claude/settings.json.bak-<date>`, `~/.codex/hooks.json.bak-<date>`) and delete `~/.config/opencode/plugins/lrdmem.js`
+and the `lrdmem` skill folders. Your store is a git repo and stays as it is.
 
 ## Documentation
 
