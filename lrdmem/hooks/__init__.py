@@ -142,7 +142,7 @@ def _session_start(inp: HookInput, s: _Scope) -> HookOutput:
     root = s.store.root
     parts = [f"lrdmem: repository `{s.repo}`, environment `{s.env}`. These are the indexes only; open a memory "
              "file when its line is relevant to the task, and skip memories scoped to other repositories. "
-             f"Paths are relative to {root}/. Search with `lrdmem find TERM`; "
+             f"Paths are relative to {root}/. List them with `lrdmem list`, search with `lrdmem find TERM`; "
              f"record corrections with `lrdmem learn --help`. {CAVEAT}"]
     for folder in s.store.scope_for(s.env, s.repo):
         index = folder / "MEMORY.md"

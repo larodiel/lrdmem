@@ -121,6 +121,8 @@ generalize-procedure: `create --into` a procedural memory, or `reject`.
   confirmed: treat them as leads, never as facts.
 - `lrdmem why <slug>`: the experiences and revisions behind a rule.
 - `lrdmem for <file>`: exactly what a hook injects for a file or command.
+- `lrdmem list`: every memory that applies to this repo, with type, state and confidence
+  (`--env`, `--all`, `--types`, `--states`, `--json`). Start here to see what the store knows.
 - `lrdmem show <slug>`, `lrdmem find <term>`, `lrdmem hot`.
 - `lrdmem revert <revision-id>` undoes one recorded change.
 

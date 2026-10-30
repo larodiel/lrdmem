@@ -398,6 +398,7 @@ options of any command.
 | | `memory propose` | candidate memories extracted from an experience |
 | | `feedback` | a recalled memory was useful, incorrect or irrelevant |
 | Look up | `recall` · `associate` · `for` | what applies to a task, file or command, and why |
+| | `list` | the memories that apply here, an environment's, or all, with type, state and confidence |
 | | `find` · `show` · `why` | search, read a memory, see its history |
 | | `hot` · `stale` · `graph` · `lint` | repeated lessons, dead paths, the map, store checks |
 | Lifecycle | `consolidate` | promote, contest, merge, and decide queued judgments |
@@ -512,6 +513,26 @@ with a text, file or command, with their signals. Agents run it before proposing
 
 `lrdmem for [FILE] [--command C] [--session ID] [--env ENV]`: prints exactly what a hook injects for a file or
 command. With `--session`, memories already injected in that session are skipped, as hooks do.
+
+#### `lrdmem list`
+
+Lists memories grouped by folder, each with its type, state, confidence (a dash when it has no evidence yet) and
+description. Inside an opted-in repository it shows what applies there: `_global/`, the environment's `_global/`
+and the repo's folder; elsewhere it shows the whole store.
+
+| Option | What it does |
+|---|---|
+| `--env ENV` | every memory of that environment, plus `_global/`, from anywhere |
+| `--all` | every memory in the store |
+| `--types T,T` | only these memory types |
+| `--states S,S` | only these states, or `all` (default: candidate, active, contested) |
+| `--json` | one object per memory: ref, folder, slug, type, state, confidence, description, triggers |
+
+```bash
+lrdmem list                        # what applies to this repo
+lrdmem list --env work --states all
+lrdmem list --all --types procedural --json
+```
 
 #### `lrdmem find`
 

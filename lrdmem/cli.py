@@ -15,7 +15,7 @@ from lrdmem.learn import LearnRefused, learn
 from lrdmem.lint import lint, printable
 from lrdmem.pr import learn_pr
 from lrdmem.session import Session
-from lrdmem.search import candidates, expand
+from lrdmem.search import candidates, expand, visible
 from lrdmem.stale import stale
 from lrdmem.store import (AmbiguousRepo, Context, Memory, Store, StoreFormatError, StoreNotConfigured, resolve,
                           store_root)
@@ -50,6 +50,44 @@ def _find(store: Store, g: Graph, args) -> int:
             _out(f"context {_rel(store, item)} — {_first(item)}")
     return 0
 
+
+_LIST_STATES = ("candidate", "active", "contested")  # superseded and obsolete only on request
+
+
+def _list(store: Store, g: Graph, args) -> int:
+    scope = None
+    if not args.all and not args.env:
+        try:
+            scope = resolve(store, Path.cwd())  # None outside an opted-in repo: list everything
+        except AmbiguousRepo as e:
+            print(printable(str(e)), file=sys.stderr)
+            return 2
+    states, types = _csv(args.states), set(_csv(args.types))
+    allowed = None if "all" in states else set(states or _LIST_STATES)
+    index = evidence.Index(store, g.memories())
+    rows = []
+    for m in sorted(g.memories(), key=lambda m: _rel(store, m)):
+        if (scope and not visible(m, *scope)) or (args.env and m.env not in (None, args.env)) \
+                or (allowed is not None and m.state not in allowed) or (types and m.memory_type not in types):
+            continue
+        ev = evidence.memory_evidence(store, m, index)
+        ref = _rel(store, m)
+        rows.append({"ref": ref, "folder": ref.rpartition("/")[0], "slug": m.slug, "type": m.memory_type,
+                     "state": m.state, "confidence": round(evidence.confidence(store, ev, index), 2) if ev else None,
+                     "description": m.description, "triggers": m.triggers})
+    if args.json:
+        _out(json.dumps(rows, indent=2))
+        return 0
+    width = max((len(r["slug"]) for r in rows), default=0)
+    folder = None
+    for r in rows:
+        if r["folder"] != folder:
+            folder = r["folder"]
+            _out(f"{'' if r is rows[0] else chr(10)}## {folder}")
+        conf = "-" if r["confidence"] is None else f"{r['confidence']:.2f}"
+        _out(f"  {r['slug']:<{width}}  {r['type'] + '/' + r['state']:<22}  {conf:>4}  {r['description']}")
+    _out(f"\n{len(rows)} memor{'y' if len(rows) == 1 else 'ies'}")
+    return 0
 
 def _pick(store: Store, g: Graph, args) -> Memory | int:
     try:
@@ -570,6 +608,14 @@ def _main(argv: list[str] | None) -> int:
     p.add_argument("--limit", type=_positive, default=20)
     p.add_argument("--json", action="store_true")
     p.add_argument("--env")
+    p = sub.add_parser("list", help="list memories: those that apply to this repo, an environment, or all")
+    p.set_defaults(fn=_list)
+    p.add_argument("--env", help="every memory of this environment (and _global), wherever you are")
+    p.add_argument("--all", action="store_true", help="every memory in the store")
+    p.add_argument("--types", action="append", help="memory types (comma-separated)")
+    p.add_argument("--states", action="append",
+                   help="memory states (comma-separated), or all; default candidate, active, contested")
+    p.add_argument("--json", action="store_true")
     p = sub.add_parser("recall", help="the memories most relevant to a task, with signals, relations and confidence")
     p.set_defaults(fn=_recall)
     p.add_argument("query", nargs="?", default="")

@@ -5,7 +5,7 @@ The full reference. For the pitch and quick start, see the [README](../README.md
 ## Commands
 
 ```
-lrdmem find TERM | show SLUG | why SLUG | hot | stale     # read the store
+lrdmem list | find TERM | show SLUG | why SLUG | hot | stale   # read the store
 lrdmem recall [QUERY] [--file F] [--command C] [--json]    # most relevant memories, with signals and relations
 lrdmem for FILE [--command CMD]                           # what a hook injects for a file or command
 lrdmem learn ... | learn-pr URL --agent NAME              # record corrections (active right away)
