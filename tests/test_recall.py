@@ -77,7 +77,10 @@ class RecallTest(unittest.TestCase):
                         "work/app/fut.md": _mem("fut", valid_from="2026-10-30"),
                         "work/app/ok.md": _mem("ok", valid_from="2026-10-29", valid_until="2026-10-29"),
                         "work/app/bad.md": _mem("bad", valid_from="'2026-11-31'", valid_until="soon"),
-                        "work/app/lex.md": _mem("lex", valid_until="2026-1-5")})
+                        "work/app/lex.md": _mem("lex", valid_until="2026-1-5"),
+                        "work/app/dt.md": _mem("dt", valid_until="2026-10-28T00:00:00Z"),
+                        "work/app/sp.md": _mem("sp", valid_until="'2026-10-28 '"),
+                        "work/app/dtf.md": _mem("dtf", valid_from="2026-10-30T09:00:00+02:00")})
         self.assertEqual(self.refs(recall(s, "work", "app", files=["a.php"], now=NOW)),
                          ["work/app/bad", "work/app/lex", "work/app/ok"])
         self.assertEqual(self.refs(recall(s, "work", "app", files=["a.php"], states="all", now=NOW)),
@@ -144,6 +147,18 @@ class RecallTest(unittest.TestCase):
             for leak in ("work/other", "work2", "OTHER"):
                 self.assertNotIn(leak, text)
 
+    def test_strong_evidence_beats_text_beyond_any_cut(self):
+        files = {f"work/app/a{i}.md": _mem(f"a{i}", "alpha alpha alpha alpha beta " + "filler " * i, trig="")
+                 for i in range(40)}
+        ev = ", ".join(f"{{ref: work/app/experiences/e{k}, kind: supports, weight: 1.0}}" for k in range(3))
+        files["work/app/strong.md"] = _mem("strong", "alpha " + "filler " * 60, trig="").replace(
+            "metadata:", f"evidence: [{ev}]\nmetadata:", 1)
+        files.update({f"work/app/experiences/e{k}.md":
+                      f"---\nid: e{k}\ndate: 2026-10-0{k + 1}\nkind: outcome\nagent: ag{k}\n---\nx\n" for k in range(3)})
+        hits = recall(self.store(files), "work", "app", query="alpha", budget=99999, now=NOW)
+        self.assertEqual(len(hits), 10)
+        self.assertIn("work/app/strong", self.refs(hits))
+
     def test_store_reads_constant_and_top_k_scored(self):
         def build(n):
             tmp = self.tmp / f"s{n}"
@@ -171,7 +186,6 @@ class RecallTest(unittest.TestCase):
             self.assertLessEqual(b[1], most)
             self.assertLessEqual(b[2], 2)
             self.assertEqual(b[0], 10)
-            self.assertLessEqual(b[4], 30)  # confidence only for the top max(limit * 3, 30)
 
     def test_empty_no_match_and_cycle(self):
         self.assertEqual(recall(self.store({}), "work", "app", query="x", files=["a.php"], now=NOW), [])

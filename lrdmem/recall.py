@@ -46,13 +46,14 @@ def _weights(cfg: dict) -> dict:
 
 def _day(value: str) -> date | None:
     try:
-        return date.fromisoformat(value)
+        return date.fromisoformat(value.strip()[:10])
     except ValueError:
         return None
 
 
 def _valid(m: Memory, today: date) -> bool:
-    """False when valid_until (YYYY-MM-DD) has passed or valid_from is still ahead; an unparseable date is no bound."""
+    """False when valid_until has passed or valid_from is still ahead, by the first 10 chars (YYYY-MM-DD, so datetimes
+    count by their written day); an unparseable date is no bound (lint flags it)."""
     until, since = _day(m.valid_until), _day(m.valid_from)
     return not (until and until < today) and not (since and since > today)
 
@@ -70,7 +71,7 @@ def recall(store: Store, env: str, repo: str, *, query: str = "", files: Sequenc
     (hypotheses included). for_hook: states active and contested only, no graph expansion, only hits with a trigger
     or entity signal, and an <env>/_global memory needs triggers.repos (the v0.1 injection rule). Whole items are
     kept in score order until the next would push the estimate (len(item)//4 tokens) past `budget`, at most `limit`.
-    Confidence and priority are computed only for the best max(limit*3, 30) by text, context and hops. Relations
+    Relations
     (validated first, at most MAX_RELATIONS) reach only nodes visible from env/repo; for hooks only active or
     contested memories (and experiences).
     """
@@ -94,19 +95,16 @@ def recall(store: Store, env: str, repo: str, *, query: str = "", files: Sequenc
     cfg = config.load()
     w = _weights(cfg)
     top = max((h.score for h in found), default=0.0) or 1.0
-    pre = []
+    index = Index(store, graph.memories())
+    scored = []
     for h in found:
         m = h.node
+        ev = memory_evidence(store, m, index)
+        conf = confidence(store, ev, index)
         context = 1.0 if m.repo is not None else 0.5 if m.env is not None else 0.25
-        pre.append(Recalled(m, w["text"] * h.score / top + w["context"] * context - w["hops"] * h.hops,
-                            list(dict.fromkeys(h.signals)), h.hops, h.via))
-    pre.sort(key=_rank)
-    index = Index(store, graph.memories())
-    scored = pre[:max(limit * 3, 30)]  # ponytail: assumes confidence+priority can't lift a hit past this cut
-    for r in scored:
-        r.provenance = memory_evidence(store, r.node, index)
-        r.confidence = confidence(store, r.provenance, index)
-        r.score += w["confidence"] * r.confidence + w["priority"] * priority(store, r.node, now, cfg, index)
+        score = (w["text"] * h.score / top + w["context"] * context + w["confidence"] * conf
+                 + w["priority"] * priority(store, m, now, cfg, index) - w["hops"] * h.hops)
+        scored.append(Recalled(m, score, list(dict.fromkeys(h.signals)), h.hops, h.via, conf, [], ev))
     scored.sort(key=_rank)
     relations = _relations(graph, index, env, repo, for_hook)
     chosen: list[Recalled] = []
