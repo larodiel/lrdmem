@@ -55,13 +55,21 @@ class SyncTest(unittest.TestCase):
         a = self.clone("a")
         write(a.root / "work" / "web" / "m.md", "hello\n")
         self.assertEqual(sync(a), [SyncResult("work", True, True, None)])
-        self.assertIn("lrdmem:", g(a.root / "work", "log", "-1", "--format=%s"))
+        self.assertEqual(g(a.root / "work", "log", "-1", "--format=%s").strip(), "feat(memory): learn 1 memories, 0 experiences")
+        self.assertIn("A web/m.md", g(a.root / "work", "log", "-1", "--format=%b"))
         b = self.clone("b")
         self.assertEqual((b.root / "work" / "web" / "m.md").read_text(), "hello\n")
         write(b.root / "work" / "n.md", "from b\n")
         self.assertIsNone(sync(b)[0].error)
         self.assertIsNone(pull(a, "work"))
         self.assertTrue((a.root / "work" / "n.md").exists())
+
+    def test_crash_left_temp_files_are_never_committed(self):
+        a = self.clone("a")
+        write(a.root / "work" / "web" / ".m.md.123.abcd.tmp", "partial")
+        write(a.root / "work" / "web" / "m.md", "hello\n")
+        self.assertIsNone(sync(a)[0].error)
+        self.assertNotIn(".tmp", g(a.root / "work", "ls-files"))
 
     def test_nothing_to_commit_and_custom_message(self):
         a = self.clone("a")

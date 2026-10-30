@@ -4,10 +4,9 @@ import os
 import subprocess
 import time
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 
-from lrdmem import config
+from lrdmem import commitmsg, config
 from lrdmem.store import Store
 
 PULL_TIMEOUT = 10
@@ -167,10 +166,17 @@ def _nested_msg(path: Path, gitlink: bool = False) -> str:
     return f"nested git repository inside the store: {path}; move it out of the store"
 
 
+def _message(repo: Path, label: str, spec: list[str]) -> str:
+    """Conventional Commits message for what is staged under spec."""
+    parts = _git(repo, "diff", "--cached", "--no-renames", "--name-status", "-z", *spec).split("\0")
+    changed = [(parts[i][:1], parts[i + 1]) for i in range(0, len(parts) - 1, 2) if parts[i]]
+    return commitmsg.build(changed, config.load()["device"], label, repo)
+
+
 def _sync_one(label: str, repo: Path, include: str, excludes: list[str], message: str,
               skip_idle: bool = False, own_repos: list[str] = ()) -> SyncResult:
     spec = ["--", f":(literal){include}" if include != "." else ".",
-            *(f":(exclude,literal){e}" for e in excludes)]
+            *(f":(exclude,literal){e}" for e in excludes), ":(exclude,glob)**/.*.tmp"]  # write.create temp files
     committed = pushed = False
     try:
         if _rebasing(repo):
@@ -187,7 +193,7 @@ def _sync_one(label: str, repo: Path, include: str, excludes: list[str], message
             if links:
                 _git(repo, "reset", "-q", "--", *(f":(literal){x}" for x in links))
                 return SyncResult(label, False, False, _nested_msg(repo / links[0], gitlink=True))
-            _git(repo, "commit", "-m", message)
+            _git(repo, "commit", "-m", message or _message(repo, label, spec))
             committed = True
         remotes = _git(repo, "remote").split()
         if remotes and skip_idle and not committed and _upstream(repo) \
@@ -218,7 +224,6 @@ def sync(store: Store, env: str | None = None, message: str | None = None,
     env "_global" stages only the _global/ folder of the root repo, never the rest of it. skip_idle (hooks):
     no pull or push for a repo where nothing was committed and nothing is ahead of its upstream.
     """
-    message = message or f"lrdmem: {config.load()['device']} {datetime.now():%Y-%m-%d %H:%M}"
     results = []
     for label, top, path in _targets(store, env):
         if top is None:
