@@ -203,7 +203,7 @@ footer a { color: var(--muted); }
       <p class="lede">Claude Code, Codex and OpenCode share one memory, kept in a git repository you own and synced
         across your machines. The right lesson shows up the moment an agent touches the file it applies to.</p>
       <div class="cta">
-        <a class="btn primary" href="#install">Install</a>
+        <a class="btn primary" href="#ask">Install</a>
         <a class="btn" href="#how">How it works</a>
         <a class="btn" href="https://github.com/larodiel/lrdmem">View on GitHub</a>
       </div>
@@ -270,10 +270,31 @@ Why recalled: <span class="c-w">file trigger **/*.php</span>
   </div>
 </section>
 
+<section id="ask">
+  <div class="wrap">
+    <div class="eyebrow">Ask your model to install it</div>
+    <h2>Let your agent set it up</h2>
+    <p class="lede">Paste this into Claude Code, Codex or OpenCode. The agent follows the install guide in
+      <a href="https://github.com/larodiel/lrdmem/blob/main/AGENTS.md#installing-lrdmem-for-a-user">AGENTS.md</a> and asks
+      before every step that changes your setup.</p>
+    <div class="code" style="margin-top:24px"><button class="copy" type="button">Copy</button><pre style="white-space:pre-wrap;padding-right:84px">Install lrdmem for me. Follow the "Installing lrdmem for a user" section of
+https://github.com/larodiel/lrdmem/blob/main/AGENTS.md
+and ask me before each step that changes my setup.</pre></div>
+    <ul class="checks">
+      <li><strong>Checks your machine.</strong> Python 3.11+, git, and which agents you have.</li>
+      <li><strong>Installs the CLI.</strong> With uv or pipx.</li>
+      <li><strong>Sets up your store.</strong> Uses yours or creates one, and opts in the repos you name.</li>
+      <li><strong>Connects your agents.</strong> Plugin or hooks, after showing you a dry run.</li>
+      <li><strong>Verifies the hooks.</strong> Before telling you to restart your sessions.</li>
+      <li><strong>Leaves the rest to you.</strong> Never approves check commands, pushes or turns on autopush.</li>
+    </ul>
+  </div>
+</section>
+
 <section id="install">
   <div class="wrap">
     <div class="eyebrow">Install</div>
-    <h2>Install the CLI, then connect your agents</h2>
+    <h2>Or install it by hand</h2>
     <p class="lede">One CLI per machine, one store for all of them. Connect each agent with its plugin or with
       <code>lrdmem install</code>, not both.</p>
     <div class="tabs" role="tablist">

@@ -2,6 +2,10 @@
 
 Instructions for AI coding agents working on the lrdmem repository. Humans: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
+> **Asked to install lrdmem for a user, not to work on its code?** Follow
+> [Installing lrdmem for a user](#installing-lrdmem-for-a-user) at the end of this file. The rest of the file is
+> about developing lrdmem, and its rule against touching the real environment applies only to that work.
+
 ## What this is
 
 A stdlib-only Python 3.11+ CLI (`lrdmem`), a skill (`lrdmem/skill/SKILL.md`) and harness hooks that give Claude Code,
@@ -90,3 +94,119 @@ Changes must keep all of these true. A change that weakens one needs an explicit
    experiences are never edited; consolidation changes are evidence-based, idempotent and recorded as revisions.
 8. `install` validates every target before writing, backs up edited files, edits symlinked configs through the link,
    and removes only hooks it owns (plus the legacy `bin/memory context` hook).
+
+## Installing lrdmem for a user
+
+Follow these steps when the user asks you to install or set up lrdmem on their machine. Ask before every step that
+changes something outside the store, and show the user what you will run. Never skip a question by guessing an
+answer that changes their setup.
+
+### 1. Check the machine
+
+```bash
+python3 --version          # needs 3.11 or newer; also try python3.11, python3.12, python3.13
+git --version
+command -v uv pipx         # one of them installs the CLI
+command -v claude codex opencode
+lrdmem --version           # already installed? then skip step 2
+```
+
+No Python 3.11+: stop and tell the user how to get one (Homebrew `brew install python@3.13`, their package
+manager, or `uv python install 3.13`). Don't change the system Python.
+
+### 2. Install the CLI
+
+```bash
+uv tool install lrdmem --python 3.11                              # preferred
+pipx install lrdmem                                               # without uv
+uv tool install git+https://github.com/larodiel/lrdmem --python 3.11  # if the PyPI package is not found
+lrdmem --version
+```
+
+If `lrdmem` is not found afterwards, run `uv tool update-shell` (or `pipx ensurepath`) and tell the user to open
+a new terminal.
+
+### 3. The store
+
+Ask the user: **do you already have a memory store (a folder or git repo of memories)?**
+
+- **Yes:** use their path.
+- **No:** propose `~/agent-memory` and, once they agree, create it:
+
+```bash
+git init ~/agent-memory
+mkdir -p ~/agent-memory/_global && touch ~/agent-memory/_global/MEMORY.md
+```
+
+Then configure this machine. For the device name, propose the short hostname and let the user change it; it must
+differ between their computers.
+
+```bash
+lrdmem config set store ~/agent-memory
+lrdmem config set device <name>
+lrdmem lint
+```
+
+Don't add a git remote, push, or turn on autopush unless the user asks; point them to the README's
+"Sync between computers" section instead.
+
+### 4. Opt in the user's projects
+
+A repository takes part when the store has `<env>/<repo>/` for it. Ask which environment names they want (for example
+`work` and `personal`), and which repositories go in each. The repo name is the main checkout's directory name:
+
+```bash
+basename "$(dirname "$(git -C <path-to-repo> rev-parse --path-format=absolute --git-common-dir)")"
+```
+
+Create each folder with an empty index:
+
+```bash
+mkdir -p ~/agent-memory/<env>/_global ~/agent-memory/<env>/<repo>
+touch ~/agent-memory/<env>/_global/MEMORY.md ~/agent-memory/<env>/<repo>/MEMORY.md
+```
+
+A repo name may live in only one environment. Never create `contexts`, `experiences`, `edges`, `revisions` or
+`queue` as a repo name.
+
+### 5. Connect the agents
+
+For each agent found in step 1, ask whether to connect it. Use **either** the plugin **or** `lrdmem install` for an
+agent, never both: both would run every hook twice.
+
+| Agent | Plugin | Without the plugin |
+|---|---|---|
+| Claude Code | `claude plugin marketplace add larodiel/lrdmem` then `claude plugin install lrdmem@lrdmem` | `lrdmem install --agent claude` |
+| Codex | `codex plugin marketplace add larodiel/lrdmem` then `codex plugin add lrdmem@lrdmem`; the user trusts the hooks in `/hooks` | `lrdmem install --agent codex` |
+| OpenCode | none | `lrdmem install --agent opencode` |
+
+Before `lrdmem install`, run it with `--dry-run`, show the user the planned changes and wait for their yes. It backs
+up every file it edits (`<file>.bak-<date>`). If the dry run says it will remove an existing hook, say which one.
+
+### 6. Verify
+
+From inside an opted-in repository:
+
+```bash
+lrdmem lint
+lrdmem for <a file in the repo>
+echo '{"session_id":"check","cwd":"'"$PWD"'","hook_event_name":"SessionStart","source":"startup"}' \
+  | lrdmem hook session-start --agent claude
+```
+
+The last command must print JSON naming the repository and environment. Then tell the user to start a new agent
+session so the hooks load.
+
+### Never, during an install
+
+- Approve check commands (`lrdmem allow <slug>`) for the user: list them with `lrdmem allow` and let the user read
+  and approve each one.
+- Put secrets, tokens or personal data in the store or the config.
+- Delete or overwrite an existing store, config or harness file. `install` keeps backups; you keep everything else.
+- Push, add remotes or turn on autopush without being asked.
+
+### Report
+
+End with: where the store is, the device name, the opted-in `<env>/<repo>` folders, which agents are connected and
+how (plugin or `lrdmem install`), any backup files created, and what is left for the user (approvals, remotes,
+restarting sessions).

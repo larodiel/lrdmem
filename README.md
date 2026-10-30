@@ -91,6 +91,22 @@ flowchart LR
 
 ## Install
 
+### Ask your model to install it
+
+Paste this into Claude Code, Codex or OpenCode:
+
+```text
+Install lrdmem for me. Follow the "Installing lrdmem for a user" section of
+https://github.com/larodiel/lrdmem/blob/main/AGENTS.md
+and ask me before each step that changes my setup.
+```
+
+The agent checks Python and git, installs the CLI, asks where your store is (or creates one), opts in the
+repositories you name, connects the agents you choose (after showing you a dry run), and verifies the hooks. It
+never approves check commands, pushes or turns on autopush for you. The same steps by hand:
+
+### By hand
+
 lrdmem is a CLI plus hooks and a skill for each harness. Install the CLI once per machine, point it at your store,
 then connect your agents.
 
