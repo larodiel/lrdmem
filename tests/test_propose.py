@@ -113,6 +113,28 @@ class ProposeTest(_Base):
         self.assertEqual((again.evidence_added, again.refused), ([], []))  # same evidence twice: no-op
         self.assertEqual(len(self.mem("spaces").evidence), 1)
 
+    def test_outcome_supports_but_never_activates_alone(self):
+        from lrdmem import consolidate
+        e = self.exp(kind="outcome", text="updating deps first fixed the migration")
+        self.apply(e, cand("deps-first", "procedural"))
+        m = self.mem("deps-first")
+        self.assertEqual((m.state, [(x.ref, x.kind) for x in m.evidence]), ("candidate", [(e.ref, "supports")]))
+        e2 = self.exp(kind="outcome", text="deps first worked again on the orders table", agent="codex")
+        self.apply(e2, {"classification": "equivalent", "relates_to": "acme/web/deps-first"}, agent="codex")
+        self.assertEqual([x.kind for x in self.mem("deps-first").evidence], ["supports", "supports"])
+        consolidate.run(self.store)
+        self.assertEqual(self.mem("deps-first").state, "active")  # two independent outcomes promote it
+
+    def test_repeated_observations_never_promote(self):
+        from lrdmem import consolidate
+        e = self.exp(kind="error", text="migration failed again")
+        self.apply(e, cand("deps-first", "procedural"))
+        e2 = self.exp(kind="discovery", text="same failure elsewhere", agent="codex")
+        self.apply(e2, {"classification": "equivalent", "relates_to": "acme/web/deps-first"}, agent="codex")
+        self.assertEqual([x.kind for x in self.mem("deps-first").evidence], ["observed_in", "observed_in"])
+        consolidate.run(self.store)
+        self.assertEqual(self.mem("deps-first").state, "candidate")
+
     def test_candidate_never_contests_an_active_memory(self):
         self.put("strong", "Strong rule")
         e = self.exp(kind="discovery", text="maybe the opposite")

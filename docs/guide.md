@@ -48,7 +48,8 @@ lrdmem install --agent claude|codex|opencode [--dry-run]  # wire hooks and the s
    generalizes edge), `contradicts` (proposed contradicts edge; only a correction can contest an active memory),
    `insufficient`.
 4. `lrdmem consolidate` runs at the end of each task (20 s, resumable): expired memories become obsolete, exact
-   duplicates merge into the oldest, candidates with 2 independent supports become active, refuted memories become
+   duplicates merge into the oldest, candidates with 2 independent supports (corrections, `outcome` experiences,
+   useful feedback, checks that pass after failing) become active, refuted memories become
    contested (and come back when supports dominate), edges with 2 independent evidences are validated. Hypotheses
    with outcome evidence, repeated experiences without a procedure and paraphrase suspects go to the judgment queue
    for an agent to resolve (`--queue`, `--resolve`). Independence means a different agent, device or day; access

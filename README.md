@@ -552,7 +552,9 @@ secrets, cited paths, and experiences edited after their first commit. Exits 1 o
 #### `lrdmem consolidate`
 
 Runs consolidation now (hooks also run it at the end of every task): marks expired memories obsolete, merges exact
-duplicates, promotes candidates with at least two independent supports, contests refuted memories and restores
+duplicates, promotes candidates with at least two independent supports (a correction, an `outcome` experience,
+`feedback useful`, or a check that passes after failing; repeated errors or discoveries never count), contests
+refuted memories and restores
 them when support returns, validates relations, and queues what needs judgment. Idempotent; stops at the budget
 and resumes on the next run.
 
@@ -575,8 +577,9 @@ revision must belong to a memory visible from where it was recorded.
 #### `lrdmem allow`
 
 `lrdmem allow [SLUG] [--env ENV]`: approves a memory's `check.run` command on this device. Without a slug, lists
-commands waiting for approval. Approval is by the exact text's hash: change one character and it needs approval
-again. Only approve commands you have read.
+commands waiting for approval. With one, it shows the command and asks for a yes in an interactive terminal; with
+no terminal (an agent's shell) it refuses, so only a person approves. Approval is by the exact text's hash: change
+one character and it needs approval again. Only approve commands you have read.
 
 #### `lrdmem check`
 

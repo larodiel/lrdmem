@@ -127,7 +127,7 @@ class SyncTest(unittest.TestCase):
         write(root / "env" / "web" / "n.md", "n")
         g(root, "init", "-q")
         write(root / "_global" / "new.md", "new")
-        self.assertEqual(sync(Store(root)), [SyncResult("_global", True, False, None)])
+        self.assertEqual(sync(Store(root)), [SyncResult("store", True, False, None)])  # the whole root repo, not only _global/
         self.assertEqual(g(root, "ls-files").count("new.md"), 1)
 
     def test_pull_reports_network_error(self):
@@ -238,7 +238,7 @@ class SyncTest(unittest.TestCase):
         g(root, "init", "-q")
         g(root, "init", "-q", "a*")
         res = {r.env: r for r in sync(Store(root))}
-        self.assertTrue(res["_global"].committed and res["a*"].committed)
+        self.assertTrue(res["store"].committed and res["a*"].committed)
         files = g(root, "ls-files", "-s")
         self.assertIn("ab/x.md", files)
         self.assertNotIn("160000", files)
@@ -268,7 +268,7 @@ class SyncTest(unittest.TestCase):
         write(other / "y.md", "y")
         (root / "personal").symlink_to(other)
         res = {r.env: r for r in sync(Store(root))}
-        self.assertEqual(res["_global"], SyncResult("_global", True, False, None))
+        self.assertEqual(res["store"], SyncResult("store", True, False, None))
         self.assertEqual(sorted(g(root, "ls-files").split()), [".gitignore", "_global/m.md"])
         self.assertEqual(g(root, "status", "--porcelain"), "")
 
@@ -371,7 +371,7 @@ class SyncTest(unittest.TestCase):
         write(root / "e1" / "x.md", "x")
         write(root / "e2" / "y.md", "y")
         g(root, "init", "-q")
-        self.assertEqual([r.env for r in sync(Store(root))], ["_global"])
+        self.assertEqual([r.env for r in sync(Store(root))], ["store"])
 
     def test_env_arg_in_root_repo_stages_only_that_env(self):
         root = self.tmp / "s"

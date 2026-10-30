@@ -211,11 +211,26 @@ class CliChecksTest(_Base):
         os.chdir(self.repo)
         self.addCleanup(os.chdir, self._cwd)
 
-    def _main(self, *argv):
+    def _main(self, *argv, answer=None):
+        """Run the CLI; `answer` simulates a person at a terminal typing it (None: no terminal, like an agent)."""
         out, err = io.StringIO(), io.StringIO()
-        with redirect_stdout(out), redirect_stderr(err):
+        with redirect_stdout(out), redirect_stderr(err), \
+                mock.patch("sys.stdin.isatty", return_value=answer is not None), \
+                mock.patch("builtins.input", return_value=answer or ""):
             code = main(list(argv))
         return code, out.getvalue(), err.getvalue()
+
+    def test_allow_needs_a_person_at_a_terminal(self):
+        self._store("true")
+        os.environ["LRDMEM_STORE"] = str(self.root)
+        code, out, err = self._main("allow", "phpcs")
+        self.assertEqual(code, 1)
+        self.assertIn("interactive terminal", err)
+        self.assertEqual(config.load()["allow"], {})
+        self.assertEqual(self._main("allow", "phpcs", answer="n")[0], 1)
+        self.assertEqual(config.load()["allow"], {})
+        self.assertEqual(self._main("allow", "phpcs", answer="y")[0], 0)
+        self.assertIn("work/app/phpcs", config.load()["allow"])
 
     def test_allow_and_check_flow(self):
         self._store("sh -c 'exit 3' {files}")
@@ -227,7 +242,7 @@ class CliChecksTest(_Base):
         code, out, err = self._main("check", "--on", "post-edit", "--files", "a.php")
         self.assertEqual(code, 0)
         self.assertIn("lrdmem check skipped: phpcs is not approved", out)
-        code, out, _ = self._main("allow", "phpcs")
+        code, out, _ = self._main("allow", "phpcs", answer="y")
         self.assertEqual(code, 0)
         self.assertIn("Only approve commands you have read.", out)
         self.assertIn("sh -c 'exit 3'", out)
@@ -237,7 +252,7 @@ class CliChecksTest(_Base):
         code, out, err = self._main("check", "--on", "post-edit", "--files", "a.php")
         self.assertEqual(code, 1)
         self.assertIn("lrdmem check failed: phpcs", out)
-        self.assertEqual(self._main("allow", "work/app/phpcs")[0], 0)
+        self.assertEqual(self._main("allow", "work/app/phpcs", answer="y")[0], 0)
         self.assertEqual(self._main("allow", "nope")[0], 1)
 
     def test_allow_refuses_unsafe_and_ambiguous(self):
@@ -258,7 +273,7 @@ class CliChecksTest(_Base):
     def test_check_files_are_repo_relative(self):
         self._store("echo got {files} && exit 1", paths="'src/*.php'")
         os.environ["LRDMEM_STORE"] = str(self.root)
-        self.assertEqual(self._main("allow", "phpcs")[0], 0)
+        self.assertEqual(self._main("allow", "phpcs", answer="y")[0], 0)
         (self.repo / "src").mkdir()
         os.chdir(self.repo / "src")
         code, out, _ = self._main("check", "--on", "post-edit", "--files", "a.php")

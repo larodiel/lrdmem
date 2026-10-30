@@ -85,6 +85,12 @@ JSON
    `insufficient`. When unsure, keep them separate. Similar wording is never evidence of
    cause.
 
+4. After you apply a recalled memory and see the result, record it as an `outcome` and
+   propose it as `equivalent` to that memory. An outcome is what promotes a candidate:
+   two independent ones (another agent, device or day) make it active. Errors and
+   discoveries that repeat what a memory already says are only observations and never
+   promote it.
+
 ## A recalled memory helped or misled: `lrdmem feedback`
 
 ```
@@ -121,8 +127,9 @@ generalize-procedure: `create --into` a procedural memory, or `reject`.
 ## Obligations
 
 Some memories carry a `check.run` command that hooks run after edits or at the end of a
-task. They run only after the user approves the exact command with `lrdmem allow`. Never
-approve a command yourself; tell the user it is pending.
+task. They run only after the user approves the exact command with `lrdmem allow`, which
+asks for a yes in an interactive terminal and refuses in your shell. Never try to approve a
+command yourself; tell the user it is pending.
 
 ## Safety
 

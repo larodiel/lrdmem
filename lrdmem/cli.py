@@ -435,9 +435,20 @@ def _allow(store: Store, g: Graph, args) -> int:
     if why:
         print(printable(f"'{args.slug}': {why}"), file=sys.stderr)
         return 1
+    if not sys.stdin.isatty():  # an agent's shell has no terminal: only a person approves a command
+        print(f"lrdmem allow asks for a yes in an interactive terminal; run it yourself after reading the command "
+              f"(lrdmem allow {printable(args.slug)})", file=sys.stderr)
+        return 1
     _out(f"{checks.key(store, m)}: {m.check['run']}")
     _out(f"sha256 {checks.command_hash(m)}")
     _out(m.path.as_posix())
+    try:
+        yes = input("Run this command on this device whenever the memory applies? [y/N] ").strip().lower() in ("y", "yes")
+    except EOFError:
+        yes = False
+    if not yes:
+        _out("Not approved.")
+        return 1
     cfg["allow"][checks.key(store, m)] = checks.command_hash(m)
     config.save(cfg)
     _out("Approved. Only approve commands you have read.")

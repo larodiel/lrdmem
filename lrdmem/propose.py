@@ -24,6 +24,7 @@ _TRIGGER_CAP, _TRIGGERS_MAX = 200, 50
 _TRIGGERS = ("paths", "commands", "repos")
 _LINKS = ("related_to", "generalizes")  # edge types a non-contradicting candidate may propose
 _STRONG = ("correction", "review")  # human corrections: memories start active, the experience supports them
+_RESULT = "outcome"  # the result of applying something: supports, but only consolidation makes it active
 _RELATES = ("equivalent", "complementary", "contradicts")
 _ERRORS = (write.Refused, LearnRefused, StoreFormatError, OSError)
 
@@ -98,7 +99,8 @@ def apply(store: Store, cwd: Path, payload: dict, *, agent: str, device: str = "
 
     The experience and every `relates_to` must be visible from cwd's repo (`search.visible`). State: `active` when
     the experience is a `correction` or `review` and the candidate is not a hypothesis nor `insufficient`, else
-    `candidate`; the experience is `supports` (weight 1) evidence for those, `observed_in` otherwise. `equivalent`
+    `candidate`. The experience is `supports` (weight 1) evidence when it is a correction, a review or an `outcome`
+    (the result of applying something), `observed_in` otherwise: seeing the same thing again never promotes. `equivalent`
     adds that evidence to `relates_to` (+ a merge revision) and creates nothing; `complementary`/`contradicts` create
     the memory and a proposed edge (`edge_type` related_to or generalizes, default related_to / contradicts). Only an
     active new memory contests: the side with the lower confidence (`evidence.memory_evidence`; a tie: the new one)
@@ -110,7 +112,7 @@ def apply(store: Store, cwd: Path, payload: dict, *, agent: str, device: str = "
     """
     exp, cands = _payload(store, payload, agent, None)
     here = _here(store, cwd, env)
-    item = Evidence(exp.ref, "supports" if exp.kind in _STRONG else "observed_in", 1.0)
+    item = Evidence(exp.ref, "supports" if exp.kind in _STRONG or exp.kind == _RESULT else "observed_in", 1.0)
     result, episode = ProposeResult(), None
     for i in sorted(range(len(cands)), key=lambda i: not _episodic(cands[i])):  # episodes first: derived_from targets
         try:
@@ -252,7 +254,7 @@ def _create(store: Store, exp: Experience, item: Evidence, plan: dict, agent: st
             result: ProposeResult) -> str:
     c, cls, mtype, slug, folder, path = (plan[k] for k in ("c", "cls", "mtype", "slug", "folder", "path"))
     target = plan["target"]
-    strong = item.kind == "supports" and mtype != "hypothesis" and cls != "insufficient"
+    strong = exp.kind in _STRONG and mtype != "hypothesis" and cls != "insufficient"
     state = "active" if strong else "candidate"
     today = today_utc()
     meta = {"type": "feedback", "memory_type": mtype, "state": state, "author": agent, "created": today,

@@ -15,7 +15,8 @@ PUSH_TIMEOUT = 30
 
 @dataclass
 class SyncResult:
-    """Outcome of syncing one repo; env is the environment name, or "_global" for the store root."""
+    """Outcome of syncing one repo; env is the environment name, "store" for the
+    whole store root repo, or "_global" when only its _global/ folder was synced."""
 
     env: str
     committed: bool
@@ -105,7 +106,8 @@ def _targets(store: Store, env: str | None) -> list[tuple[str, Path | None, Path
     root = store.root.resolve()
     seen: dict[Path, str] = {}
     out = []
-    names = [env] if env else [None, *store.environments()]  # "_global" alone: only _global/ of the root repo
+    # "_global" alone: only _global/ of the root repo; None: the whole root repo, labelled "store"
+    names = [env] if env else [None, *store.environments()]
     for name in names:
         path = store.root if name is None else store.root / name
         if name is not None and not path.is_dir():
@@ -118,8 +120,8 @@ def _targets(store: Store, env: str | None) -> list[tuple[str, Path | None, Path
                 out.append((name, None, path))
             continue
         if top not in seen:
-            seen[top] = name or "_global"
-            out.append((name or "_global", top, path))
+            seen[top] = name or "store"
+            out.append((name or "store", top, path))
     return out
 
 
