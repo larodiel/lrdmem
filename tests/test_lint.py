@@ -105,6 +105,10 @@ class LintTest(unittest.TestCase):
         self.has(clean(**{"work/app/a.md": mem().replace("  author: me\n", "")}), "metadata.author")
         self.has(clean(**{"work/app/a.md": mem().replace("2026-01-01", "soon")}), "metadata.updated")
         self.has(clean(**{"work/app/a.md": mem(body="nothing\n")}), "**Why:**")
+        for kind in ("project", "feedback"):
+            self.has(clean(**{"work/app/a.md": mem(body="[[g]]\n").replace("feedback", kind)}), "**Why:**")
+        for kind in ("reference", "user"):
+            self.assertEqual(self.run_lint(clean(**{"work/app/a.md": mem(body="[[g]]\n").replace("feedback", kind)})), [])
 
     def test_kind_and_check(self):
         self.has(clean(**{"work/app/a.md": mem(meta="  kind: weird\n")}), "metadata.kind")
