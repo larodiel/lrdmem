@@ -1,4 +1,5 @@
 import os
+import os
 import tempfile
 import threading
 import unittest
@@ -37,6 +38,18 @@ class WriteTest(unittest.TestCase):
         (p / "b.md").write_text("replaced\n")
         self.assertFalse(write.discard(self.store, self.folder, "edges/b.md", st))
         self.assertTrue((p / "b.md").exists())
+
+    def test_discard_survives_inode_reuse(self):
+        # Linux reuses a freed inode at once: a replacement can have the created file's (device, inode)
+        p = self.folder / "edges"
+        p.mkdir()
+        st = write.create_new(p / "c.md", "x\n")
+        (p / "c.md").unlink()
+        (p / "c.md").write_text("replaced by someone else\n")
+        now = os.lstat(p / "c.md")
+        reused = os.stat_result((st.st_mode, now.st_ino, now.st_dev, *st[3:]))  # same identity, our size and times
+        self.assertFalse(write.discard(self.store, self.folder, "edges/c.md", reused))
+        self.assertEqual((p / "c.md").read_text(), "replaced by someone else\n")
 
     def test_discard_refuses_outside_the_store(self):
         victim = self.tmp / "victim.txt"

@@ -122,14 +122,16 @@ def discard(store: Store, scope_folder: Path, rel: str, created: os.stat_result)
     """Delete `rel` in a scope folder only if it is still the file `create_new` returned `created` for.
 
     Resolved through `target` (store, scope and symlink checks, Refused on violation); False, deleting nothing,
-    when the file is gone or its (device, inode) differs, i.e. it was replaced since.
+    when the file is gone or was replaced since: its (device, inode, size, mtime) differs. Size and mtime matter
+    because Linux hands a freed inode to the next file at once, so a replacement can reuse the identity.
     """
     path = target(store, scope_folder, rel)
     try:
         now = os.lstat(path)
     except FileNotFoundError:
         return False
-    if (now.st_dev, now.st_ino) != (created.st_dev, created.st_ino):
+    if (now.st_dev, now.st_ino, now.st_size, now.st_mtime_ns) != \
+            (created.st_dev, created.st_ino, created.st_size, created.st_mtime_ns):
         return False
     os.unlink(path)
     return True
