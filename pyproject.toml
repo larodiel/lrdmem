@@ -8,12 +8,15 @@ dynamic = ["version"]
 description = "Shared git-backed memory store for AI coding agents"
 readme = "README.md"
 license = { text = "MIT" }
-authors = [{ name = "Victor Larodiel" }]
+authors = [{ name = "Victor Larodiel", email = "victor@larodiel.com" }]
 requires-python = ">=3.11"
 dependencies = []
 
 [project.urls]
+Homepage = "https://larodiel.github.io/lrdmem/"
 Repository = "https://github.com/larodiel/lrdmem"
+Documentation = "https://github.com/larodiel/lrdmem/blob/main/docs/guide.md"
+Issues = "https://github.com/larodiel/lrdmem/issues"
 
 [project.scripts]
 lrdmem = "lrdmem.cli:main"
