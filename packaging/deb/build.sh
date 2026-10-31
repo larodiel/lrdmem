@@ -21,7 +21,7 @@ cat > "$stage/DEBIAN/control" <<CTL
 Package: lrdmem
 Version: $version
 Architecture: all
-Maintainer: Victor Larodiel <victor.larodiel@gmail.com>
+Maintainer: Victor Larodiel <victor@larodiel.com>
 Depends: python3 (>= 3.11), git
 Section: utils
 Priority: optional
