@@ -12,10 +12,11 @@ import threading
 from pathlib import Path
 from typing import Callable
 
+from lrdmem import config
 from lrdmem.frontmatter import dump, split
 from lrdmem.lint import has_secret
 from lrdmem.model import Evidence
-from lrdmem.store import SUBFOLDERS, Store
+from lrdmem.store import SUBFOLDERS, Store, main_checkout, resolve
 
 FIELD = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _COMPUTED = ("confidence", "priority")
@@ -70,6 +71,49 @@ def target(store: Store, scope_folder: Path, rel: str) -> Path:
         if cur.is_symlink():
             raise Refused(f"{name} is a symlink; refusing to write through it")
     return cur
+
+
+def resolve_or_enroll(store: Store, cwd: Path, env: str | None = None,
+                      enroll: dict[str, str] | None = None) -> tuple[str, str] | None:
+    """resolve(), but a checkout under a mapped path gets its folder (with an empty MEMORY.md) when it has none.
+
+    `enroll` maps an absolute checkout-group path to an environment; it defaults to the device config's `enroll`.
+    The longest matching path wins and only whole path segments match. A mapping to an environment the store does
+    not have, or to a different one than `env`, creates nothing. Only write paths use this: reads never create folders.
+    """
+    found = resolve(store, cwd, env)
+    if found:
+        return found
+    checkout = main_checkout(cwd)
+    if not checkout:
+        return None
+    mapping = config.load()["enroll"] if enroll is None else enroll
+    best = None
+    for prefix, target_env in mapping.items():
+        group = Path(prefix).resolve()
+        if group in checkout.resolve().parents and (best is None or len(group.parts) > len(best[0].parts)):
+            best = (group, target_env)
+    if not best or best[1] not in store.environments() or (env and env != best[1]):
+        return None
+    try:
+        return register_repo(store, cwd, best[1])
+    except Refused:
+        return None
+
+
+def register_repo(store: Store, cwd: Path, env: str) -> tuple[str, str]:
+    """Register cwd's repository in `env`: create its folder with an empty MEMORY.md if absent. Refused when cwd is
+    not in a git repository, `env` is not an environment of the store, or the repository name is reserved."""
+    checkout = main_checkout(cwd)
+    if not checkout:
+        raise Refused("this directory is not in a git repository")
+    if env not in store.environments():
+        raise Refused(f"unknown environment '{env}'; choose one of: {', '.join(store.environments()) or 'none'}")
+    folder = store.root / env / checkout.name
+    index = target(store, folder, "MEMORY.md")
+    folder.mkdir(exist_ok=True)
+    create(index, "")
+    return env, checkout.name
 
 
 def create(path: Path, text: str) -> bool:

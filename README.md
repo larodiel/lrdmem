@@ -390,7 +390,7 @@ options of any command.
 
 | Group | Command | What it does |
 |---|---|---|
-| Setup | `config set` · `config autopush` · `config show` | point at the store, name the device, turn autopush on or off |
+| Setup | `enroll` · `config set` · `config autopush` · `config enroll` · `config show` | point at the store, name the device, turn autopush on or off, enrol repositories by path |
 | | `install` | wire hooks and the skill into Claude Code, Codex or OpenCode |
 | Record | `learn` | a correction from the user, active right away |
 | | `learn-pr` | review comments from a GitHub PR |
@@ -418,6 +418,20 @@ options of any command.
 
 `lrdmem config autopush on|off [--env ENV]`: let hooks commit and push the store at the end of a task, for one
 environment or all. Off by default.
+
+#### `lrdmem config enroll`
+
+`lrdmem config enroll PATH ENV`: a repository whose main checkout is under `PATH` gets its `ENV/<repo>/` folder (with
+an empty `MEMORY.md`) the first time a hook or a write command (`learn`, `learn-pr`) runs there, instead of being
+refused as "not opted in". The longest matching `PATH` wins and only whole path segments match. `ENV` must already
+exist in the store, otherwise nothing is created. Reads (`list`, `recall`, `find`) never create folders. Stored per
+device in the config as `enroll`.
+
+#### `lrdmem enroll`
+
+`lrdmem enroll [--env ENV]`: register this repository in the store by creating `ENV/<repo>/` with an empty
+`MEMORY.md`. Without `--env` it prints the store's environments and creates nothing. Run it after asking the user
+which environment the project belongs to; the skill does this when `learn` says the repository is not registered.
 
 #### `lrdmem config show`
 
