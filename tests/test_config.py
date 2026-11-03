@@ -103,3 +103,15 @@ class ConfigTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_enroll_maps_a_checkout_group_to_an_environment(self):
+        out = io.StringIO()
+        group = self.tmp / "checkouts"
+        with redirect_stdout(out):
+            self.assertEqual(main(["config", "enroll", str(group), "work"]), 0)
+        self.assertEqual(config.load()["enroll"], {str(group.resolve()): "work"})
+        self.assertEqual(config.load()["enroll"] and json.loads(self.path.read_text())["enroll"],
+                         {str(group.resolve()): "work"})
+
+    def test_enroll_defaults_to_no_mapping(self):
+        self.assertEqual(config.load()["enroll"], {})

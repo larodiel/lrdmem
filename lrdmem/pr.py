@@ -9,7 +9,8 @@ from pathlib import Path
 
 from lrdmem.learn import learn, terms
 from lrdmem.lint import printable
-from lrdmem.store import Store, resolve
+from lrdmem import write
+from lrdmem.store import Store
 
 _URL = re.compile(r"^https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)/pull/(\d+)(?:#.*|/files.*)?$")
 _REMOTE = re.compile(r"^(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$")
@@ -90,7 +91,7 @@ def learn_pr(store: Store, cwd: Path, url: str, agent: str, run=subprocess.run, 
     LookupError if cwd is not opted in.
     """
     owner, pr_repo, _ = _parse(url)
-    found = resolve(store, cwd, env)
+    found = write.resolve_or_enroll(store, cwd, env)
     if not found:
         raise LookupError("this repository is not opted in to the store")
     e, repo = found

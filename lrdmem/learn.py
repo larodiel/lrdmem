@@ -13,7 +13,7 @@ from lrdmem.frontmatter import parse
 from lrdmem.lint import KINDS, SOURCES, has_secret
 from lrdmem.model import today_utc, v01_memory_type
 from lrdmem.search import alike
-from lrdmem.store import AmbiguousRepo, Experience, Store, StoreFormatError, resolve
+from lrdmem.store import AmbiguousRepo, Experience, Store, StoreFormatError
 
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 _LINK = re.compile(r"\[\[([^\]]+)\]\]")
@@ -54,11 +54,12 @@ def scope_folder(store: Store, cwd: Path, scope: str, env: str | None) -> tuple[
     if env is not None and env not in store.environments():
         raise LearnRefused(f"unknown environment '{env}'")
     try:
-        found = resolve(store, cwd, env)
+        found = write.resolve_or_enroll(store, cwd, env)
     except AmbiguousRepo as e:
         raise LearnRefused(str(e)) from None
     if not found:
-        raise LearnRefused("this repository is not opted in to the store; use scope global or create its folder")
+        raise LearnRefused("this repository is not registered in the store; ask the user, then run `lrdmem enroll --env ENV` "
+                           "(or use scope global)")
     e, repo = found
     return store.root / e / ("_global" if scope == "env" else repo), e
 

@@ -500,8 +500,8 @@ class Store:
         return [self.root / "_global", self.root / env / "_global", self.root / env / repo]
 
 
-def repo_key(cwd: Path) -> str | None:
-    """Main-checkout directory name for cwd (same from every worktree), None outside git."""
+def main_checkout(cwd: Path) -> Path | None:
+    """Path of the main checkout for cwd (same from every worktree), None outside git."""
     try:
         common = subprocess.run(
             ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
@@ -509,7 +509,13 @@ def repo_key(cwd: Path) -> str | None:
         ).stdout.strip()
     except (OSError, subprocess.CalledProcessError):
         return None
-    return Path(common).parent.name
+    return Path(common).parent
+
+
+def repo_key(cwd: Path) -> str | None:
+    """Main-checkout directory name for cwd (same from every worktree), None outside git."""
+    checkout = main_checkout(cwd)
+    return checkout.name if checkout else None
 
 
 def resolve(store: Store, cwd: Path, env: str | None = None) -> tuple[str, str] | None:

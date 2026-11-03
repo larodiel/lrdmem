@@ -8,8 +8,7 @@ description: Use when the user corrects your work, a PR review asks for a change
 lrdmem is a memory shared by every agent and device, kept as files in a git repository. Three
 things never mix:
 
-- an **experience** is what happened (an error, decision, discovery, outcome, correction). It
-  is written once and never edited;
+- an **experience** is what happened (error, decision, discovery, outcome, correction), written once, never edited;
 - a **memory** is the reusable lesson, with a type (episodic, semantic, procedural,
   hypothesis, prospective, metacognitive), a state (candidate, active, contested,
   superseded, obsolete) and the evidence behind it;
@@ -44,6 +43,11 @@ Scopes: `--scope repo` (this repository), `--scope env` (every repository of the
 always pass `--repos`), `--scope global` (about the user). Set `--paths`/`--commands` triggers so hooks show
 the rule at the right moment. `lrdmem learn-pr <url> --agent claude` records review
 comments from the repository's owners, members and collaborators.
+
+## Not registered yet: `lrdmem enroll`
+
+If `learn` says the repository is not registered, ask the user "This project isn't registered in the memory store yet.
+Register it?", offer the environments `lrdmem enroll` lists, run `lrdmem enroll --env <choice>`, repeat the command.
 
 ## Something worth remembering happened: experience → candidates
 

@@ -75,3 +75,40 @@ class CliTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EnrollCommandTest(unittest.TestCase):
+    def setUp(self):
+        import os
+        import subprocess
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+        from tests.fixtures import make_store
+        t = tempfile.TemporaryDirectory()
+        self.addCleanup(t.cleanup)
+        tmp = Path(t.name)
+        self.root = make_store(tmp, {"work/_global/a.md": "---\nname: a\ndescription: d\n---\n"})
+        self.repo = tmp / "app"
+        self.repo.mkdir()
+        subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
+        p = mock.patch.dict(os.environ, {"LRDMEM_STORE": str(self.root)})
+        p.start()
+        self.addCleanup(p.stop)
+        old = os.getcwd()
+        os.chdir(self.repo)
+        self.addCleanup(os.chdir, old)
+
+    def test_without_env_it_lists_the_environments_and_creates_nothing(self):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(main(["enroll"]), 1)
+        self.assertIn("work", out.getvalue())
+        self.assertFalse((self.root / "work/app").exists())
+
+    def test_with_env_it_registers_the_repository(self):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(main(["enroll", "--env", "work"]), 0)
+        self.assertEqual(out.getvalue().strip(), "work/app")
+        self.assertTrue((self.root / "work/app/MEMORY.md").is_file())

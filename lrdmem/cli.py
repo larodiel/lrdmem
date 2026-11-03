@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from lrdmem import __version__, checks, config, consolidate, evidence, experience, propose, recall, revision
+from lrdmem import __version__, checks, config, consolidate, evidence, experience, propose, recall, revision, write
 from lrdmem.export import to_dot, to_html, to_json
 from lrdmem.graph import AmbiguousSlug, Graph
 from lrdmem.hooks import HookInput, dispatch, handle
@@ -281,6 +281,19 @@ def _csv(values: list[str] | None) -> list[str]:
     return [v.strip() for value in values or [] for v in value.split(",") if v.strip()]
 
 
+def _enroll(store: Store, g: Graph, args) -> int:
+    if not args.env:
+        _out("environments: " + (", ".join(store.environments()) or "none"))
+        return 1
+    try:
+        env, repo = write.register_repo(store, Path.cwd(), args.env)
+    except write.Refused as e:
+        print(printable(str(e)), file=sys.stderr)
+        return 1
+    _out(f"{env}/{repo}")
+    return 0
+
+
 def _learn(store: Store, g: Graph, args) -> int:
     try:
         r = learn(store, Path.cwd(), memory=args.memory, mistake=args.mistake, correction=args.correction,
@@ -447,6 +460,8 @@ def _config(args) -> int:
         cfg[args.key] = str(Path(args.value).resolve()) if args.key == "store" else args.value
     elif args.action == "autopush":
         cfg["autopush"][args.env or "*"] = args.state == "on"
+    elif args.action == "enroll":
+        cfg["enroll"][str(Path(args.path).resolve())] = args.env
     if args.action == "show":
         _out(json.dumps(cfg, indent=2))
     else:
@@ -634,6 +649,9 @@ def _main(argv: list[str] | None) -> int:
     p.add_argument("--command")
     p.add_argument("--session")
     p.add_argument("--env")
+    p = sub.add_parser("enroll", help="register this repository in the store (without --env: list the environments)")
+    p.add_argument("--env")
+    p.set_defaults(fn=_enroll)
     p = sub.add_parser("learn", help="record a correction as a context linked to a memory")
     p.set_defaults(fn=_learn)
     p.add_argument("--memory", required=True)
@@ -691,6 +709,9 @@ def _main(argv: list[str] | None) -> int:
     q = csub.add_parser("autopush", help="commit and push automatically for an environment (default: all)")
     q.add_argument("state", choices=["on", "off"])
     q.add_argument("--env")
+    q = csub.add_parser("enroll", help="create a repo's folder in an environment on first use, for checkouts under PATH")
+    q.add_argument("path")
+    q.add_argument("env")
     csub.add_parser("show", help="print the configuration as JSON")
     p = sub.add_parser("allow", help="approve a memory's check command to run on this device. "
                                      "Only approve commands you have read.")

@@ -1,4 +1,4 @@
-"""Per-device configuration: store path, device name, autopush flags and the check allowlist."""
+"""Per-device configuration: store path, device name, autopush flags, the check allowlist and the enroll map."""
 
 import json
 import os
@@ -19,7 +19,7 @@ def _path() -> Path:
 
 def load() -> dict:
     """The config with defaults filled in; a missing or corrupt file yields the defaults (and save() then refuses)."""
-    cfg = {"store": None, "device": socket.gethostname(), "autopush": {}, "allow": {}}
+    cfg = {"store": None, "device": socket.gethostname(), "autopush": {}, "allow": {}, "enroll": {}}
     path = _path()
     _corrupt.discard(path)
     try:
@@ -32,7 +32,7 @@ def load() -> dict:
         _corrupt.add(path)
         return cfg
     cfg.update(data)
-    for key in ("autopush", "allow"):
+    for key in ("autopush", "allow", "enroll"):
         if not isinstance(cfg[key], dict):
             cfg[key] = {}
     if not isinstance(cfg["store"], str):

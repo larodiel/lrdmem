@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import tempfile
@@ -7,6 +8,7 @@ from unittest import mock
 
 from lrdmem.store import (SUPPORTED_FORMAT, AmbiguousRepo, Context, Edge, Experience, Memory, QueueItem, Revision,
                           Store, StoreFormatError, repo_key, resolve, store_root)
+from lrdmem import write
 from tests.fixtures import make_store
 
 
@@ -134,6 +136,80 @@ class StoreTest(unittest.TestCase):
             resolve(s, repo)
         self.assertEqual(resolve(s, repo, "home"), ("home", "app"))
         self.assertIsNone(resolve(s, repo, "nope"))
+
+
+class EnrollTest(unittest.TestCase):
+    def setUp(self):
+        self._t = tempfile.TemporaryDirectory()
+        self.addCleanup(self._t.cleanup)
+        self.tmp = Path(self._t.name)
+        self.root = make_store(self.tmp, {"work/_global/a.md": _mem()})
+        self.store = Store(self.root)
+        self.group = self.tmp / "checkouts" / "acme"
+        self.repo = self.group / "app"
+        self.repo.mkdir(parents=True)
+        subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
+
+    def test_a_mapped_checkout_gets_its_folder_and_index(self):
+        found = write.resolve_or_enroll(self.store, self.repo, enroll={str(self.group): "work"})
+        self.assertEqual(found, ("work", "app"))
+        self.assertEqual((self.root / "work/app/MEMORY.md").read_text(), "")
+        self.assertEqual(resolve(self.store, self.repo), ("work", "app"))
+
+    def test_an_unmapped_checkout_stays_out(self):
+        self.assertIsNone(write.resolve_or_enroll(self.store, self.repo, enroll={}))
+        self.assertFalse((self.root / "work/app").exists())
+
+    def test_a_mapping_to_an_unknown_environment_creates_nothing(self):
+        self.assertIsNone(write.resolve_or_enroll(self.store, self.repo, enroll={str(self.group): "nope"}))
+        self.assertFalse((self.root / "nope").exists())
+
+    def test_a_prefix_only_matches_whole_path_segments(self):
+        self.assertIsNone(write.resolve_or_enroll(self.store, self.repo, enroll={str(self.group)[:-1]: "work"}))
+        self.assertFalse((self.root / "work/app").exists())
+
+    def test_the_longest_prefix_wins(self):
+        (self.root / "home").mkdir()
+        enroll = {str(self.group.parent): "home", str(self.group): "work"}
+        self.assertEqual(write.resolve_or_enroll(self.store, self.repo, enroll=enroll), ("work", "app"))
+
+    def test_an_existing_folder_is_left_alone(self):
+        (self.root / "work/app").mkdir()
+        (self.root / "work/app/MEMORY.md").write_text("- keep\n")
+        write.resolve_or_enroll(self.store, self.repo, enroll={str(self.group): "work"})
+        self.assertEqual((self.root / "work/app/MEMORY.md").read_text(), "- keep\n")
+
+    def test_outside_git_is_none(self):
+        plain = self.group / "plain"
+        plain.mkdir()
+        self.assertIsNone(write.resolve_or_enroll(self.store, plain, enroll={str(self.group): "work"}))
+
+    def test_enroll_registers_the_checkout_in_the_chosen_environment(self):
+        self.assertEqual(write.register_repo(self.store, self.repo, "work"), ("work", "app"))
+        self.assertEqual((self.root / "work/app/MEMORY.md").read_text(), "")
+
+    def test_enroll_keeps_an_existing_folder(self):
+        write.register_repo(self.store, self.repo, "work")
+        (self.root / "work/app/MEMORY.md").write_text("- keep\n")
+        self.assertEqual(write.register_repo(self.store, self.repo, "work"), ("work", "app"))
+        self.assertEqual((self.root / "work/app/MEMORY.md").read_text(), "- keep\n")
+
+    def test_enroll_refuses_an_unknown_environment_and_names_the_known_ones(self):
+        with self.assertRaisesRegex(write.Refused, "work"):
+            write.register_repo(self.store, self.repo, "nope")
+        self.assertFalse((self.root / "nope").exists())
+
+    def test_enroll_refuses_outside_git(self):
+        plain = self.group / "plain"
+        plain.mkdir()
+        with self.assertRaises(write.Refused):
+            write.register_repo(self.store, plain, "work")
+
+    def test_the_mapping_comes_from_the_device_config(self):
+        cfg = self.tmp / "config.json"
+        cfg.write_text(json.dumps({"enroll": {str(self.group): "work"}}))
+        with mock.patch.dict(os.environ, {"LRDMEM_CONFIG": str(cfg)}):
+            self.assertEqual(write.resolve_or_enroll(self.store, self.repo), ("work", "app"))
 
 
 def _v2(extra_meta="", top="", body="b\n"):

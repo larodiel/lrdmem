@@ -11,7 +11,7 @@ from lrdmem.checks import CheckResult, pending, problem, run_checks
 from lrdmem.lint import lint, printable
 from lrdmem.recall import recall, render
 from lrdmem.session import Session
-from lrdmem.store import Store, resolve, store_root
+from lrdmem.store import Store, store_root
 from lrdmem.sync import autopush_enabled, pull, sync, toplevel
 from lrdmem.triggers import CAVEAT
 
@@ -90,7 +90,7 @@ def patch_paths(patch: str) -> list[str]:
 def _scope(inp: HookInput) -> _Scope | None:
     """The opted-in repo for this event, or None; AmbiguousRepo and a missing store raise (handled by the caller)."""
     store = Store(store_root())
-    found = resolve(store, inp.cwd)
+    found = write.resolve_or_enroll(store, inp.cwd)
     return _Scope(store, config.load(), *found) if found else None
 
 
