@@ -2,11 +2,12 @@
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
-from lrdmem import __version__, checks, config, consolidate, evidence, experience, migrate, propose, recall, revision, usage, write
+from lrdmem import __version__, checks, config, consolidate, evidence, experience, mcp, migrate, propose, recall, revision, usage, write
 from lrdmem.export import to_dot, to_html, to_json
 from lrdmem.graph import AmbiguousSlug, Graph
 from lrdmem.hooks import HookInput, dispatch, handle
@@ -193,6 +194,16 @@ def _migrate(store: Store, g: Graph, args) -> int:
     for ref in failed:
         print(printable(f"{ref}: could not edit its header safely; left as it was"), file=sys.stderr)
     return 1 if failed else 0
+
+
+def _mcp(cwd: str | None) -> int:
+    if cwd:
+        try:
+            os.chdir(cwd)
+        except OSError as e:
+            print(printable(f"lrdmem: cannot use --cwd: {e.strerror}"), file=sys.stderr)
+            return 1
+    return mcp.serve(sys.stdin, sys.stdout)
 
 
 def _repo_relative(file: str | None) -> str | None:
@@ -795,6 +806,8 @@ def _main(argv: list[str] | None) -> int:
     p.add_argument("--agent", default="claude", help="claude, codex or opencode")
     sub.add_parser("context", help="same as `hook session-start`").add_argument(
         "--agent", default="claude", help="claude, codex or opencode")
+    p = sub.add_parser("mcp", help="serve the store read-only to MCP clients over stdio")
+    p.add_argument("--cwd", help="repository directory `memory_recall` works from (default: the current one)")
     p = sub.add_parser("install", help="install lrdmem's hooks and skill into a harness's user config")
     p.add_argument("--agent", choices=AGENTS, required=True)
     p.add_argument("--dry-run", action="store_true", help="print the planned changes and write nothing")
@@ -803,6 +816,8 @@ def _main(argv: list[str] | None) -> int:
         return _hook(args.phase, args.agent)
     if args.command == "context":
         return _context(args.agent)
+    if args.command == "mcp":
+        return _mcp(args.cwd)
     if args.command == "config":
         return _config(args)
     if args.command == "install":

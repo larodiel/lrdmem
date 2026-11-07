@@ -401,7 +401,7 @@ options of any command.
 | Look up | `recall` · `associate` · `for` | what applies to a task, file or command, and why |
 | | `list` | the memories that apply here, an environment's, or all, with type, state and confidence |
 | | `find` · `show` · `why` | search, read a memory, see its history |
-| | `hot` · `usage` · `migrate` · `stale` · `graph` · `lint` | repeated lessons, what hooks injected, dead paths, the map, store checks |
+| | `hot` · `usage` · `migrate` · `mcp` · `stale` · `graph` · `lint` | repeated lessons, what hooks injected, dead paths, the map, store checks |
 | Lifecycle | `consolidate` | promote, contest, merge, and decide queued judgments |
 | | `revert` | undo one recorded change |
 | Obligations | `allow` · `check` | approve check commands, run them |
@@ -437,6 +437,15 @@ which environment the project belongs to; the skill does this when `learn` says 
 #### `lrdmem config show`
 
 Prints this device's configuration as JSON.
+
+#### `lrdmem mcp`
+
+`lrdmem mcp [--cwd DIR]`: a read-only [MCP](https://modelcontextprotocol.io) server on stdio, for apps without hooks,
+such as a chat window. Tools: `memory_find`, `memory_show`, `memory_why`, `memory_list` and `memory_recall` (which
+works from `--cwd`, or the directory the server starts in). Arguments are validated and never become flags or paths,
+answers are labelled as reference data and capped at 20,000 characters, and there is no write tool: memories are
+recorded by the hooks and `lrdmem learn`. Add it to a client's config as
+`{"mcpServers": {"lrdmem": {"command": "lrdmem", "args": ["mcp", "--cwd", "/path/to/repo"]}}}`.
 
 #### `lrdmem install`
 
