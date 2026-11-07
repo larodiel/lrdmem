@@ -33,14 +33,17 @@ actionlint .github/workflows/*.yml                       # after editing workflo
 | `frontmatter.py` | parse/dump the YAML subset; `unsupported()` lines |
 | `store.py` | environments, folders, `Memory`/`Context`, `resolve(cwd)`, `store_root()` |
 | `graph.py` | memory/context graph, slug resolution, `find`/`hot`/`edges` |
-| `triggers.py` | `in_scope`, `matches` (trigger globs/prefixes), `CAVEAT` |
+| `triggers.py` | `in_scope`, `matches` (trigger globs/prefixes), `CAVEAT`; `triggers.repos` also filters the session-start index |
 | `recall.py` | `recall` (scored, budgeted; hooks use `for_hook=True`), `render`, `to_json` |
-| `lint.py` | store checks, `SECRET`, `printable()` |
+| `lint.py` | store checks (format, scope, decisions), `SECRET`, `TICKET`, `printable()` |
 | `model.py`, `write.py`, `revision.py` | v2 constants and `today_utc`; the only write path (secret guard); revisions |
 | `experience.py`, `propose.py`, `edges.py` | experiences and feedback; validated candidates; typed relations |
 | `evidence.py`, `search.py`, `consolidate.py` | confidence/priority on read; BM25+graph search; consolidation and queue |
 | `commitmsg.py` | Conventional Commits messages for every lrdmem commit |
-| `learn.py`, `pr.py` | writing contexts/memories; PR review ingestion |
+| `learn.py`, `pr.py` | writing contexts/memories (global scope refuses repo specifics; violation hints; decisions); PR review ingestion |
+| `usage.py`, `digest.py` | the device-local recall log and `usage` report; the read-only `digest` for scheduled runs |
+| `migrate.py` | repairs legacy memories: misplaced metadata, inferred `triggers.paths` (dry run unless `--apply`) |
+| `mcp.py` | read-only MCP server over stdio: fixed, validated calls of the CLI, no write tool |
 | `checks.py`, `config.py` | obligation approval (hash allowlist) and execution; device config |
 | `sync.py` | git pull/commit/push per environment repo |
 | `hooks/` | harness-neutral `handle()` + `claude`, `codex`, `opencode` adapters and the OpenCode JS plugin |
@@ -94,6 +97,9 @@ Changes must keep all of these true. A change that weakens one needs an explicit
    experiences are never edited; consolidation changes are evidence-based, idempotent and recorded as revisions.
 8. `install` validates every target before writing, backs up edited files, edits symlinked configs through the link,
    and removes only hooks it owns (plus the legacy `bin/memory context` hook).
+9. `mcp` stays read-only: no write tool, arguments validated and never flags or paths, answers labelled as reference
+   data, stripped of control characters and capped. The recall log (`usage.py`) lives beside the device config, never
+   in the store, and a failure to write it never reaches the agent.
 
 ## Installing lrdmem for a user
 

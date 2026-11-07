@@ -73,7 +73,7 @@ flowchart LR
 ## What you get
 
 - **One store, three harnesses.** Claude Code, Codex CLI and OpenCode run the same hooks through one entry point,
-  as a plugin or wired by `lrdmem install`.
+  as a plugin or wired by `lrdmem install`. Apps without hooks, such as a chat window, read it through `lrdmem mcp`.
 - **Learns from chat, PR reviews and check runs.** The bundled skill teaches agents to record corrections with
   `lrdmem learn`; `lrdmem learn-pr <url>` turns your review comments into experiences; hooks record every
   obligation check that passes or fails.
@@ -82,10 +82,15 @@ flowchart LR
   for every change, all computed from evidence.
 - **A brain you can query.** `recall`, `associate`, `find`, `show`, `why` (the timeline behind a rule), `hot`,
   `stale`, and `graph` to an HTML, JSON or DOT map.
+- **It measures itself.** Hooks log what they injected; `usage` shows which memories earn their place and which never
+  fire, and `digest` is one read-only summary a scheduler can run. A correction on an existing rule says why it was
+  broken (index only, triggers missed, or matched anyway). `migrate` repairs memories written before the v2 model.
+- **Decisions, not just rules.** `learn --kind decision` keeps the alternatives rejected and a date to revisit it.
 - **Plain Markdown in git.** Every memory is a file you can read, edit, review and revert. `[[links]]` between
   memories work in Obsidian too. Every automatic commit follows Conventional Commits.
-- **Scoped by environment.** Keep `work/` and `personal/` apart, each its own repo, shareable on its own.
-  Company-wide rules live in `<env>/_global/`; facts about you in `_global/`.
+- **Scoped by environment and repo.** Keep `work/` and `personal/` apart, each its own repo, shareable on its own.
+  Company-wide rules live in `<env>/_global/`, facts about you in `_global/`, and a memory's `triggers.repos` also
+  keeps its line out of the session index of other repos. Lint and `learn` refuse repository details in `_global/`.
 - **Sync your way.** `lrdmem sync` when you want, or autopush per device and per environment.
 - **Zero dependencies.** Python 3.11+ standard library only. Hooks answer in about 100 ms.
 
