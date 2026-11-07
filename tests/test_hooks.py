@@ -152,6 +152,18 @@ class ClaudeHookTest(_Base):
         text = json.loads(self.hook("session-start", self.payload("session_start")))
         self.assertNotIn("hidden", text["hookSpecificOutput"]["additionalContext"])
 
+    def test_session_start_lists_decisions_due_for_review(self):
+        def decision(name, revisit):
+            return (STYLE.replace("php-style", name).replace("  type: feedback\n", f"  type: feedback\n  kind: decision\n"
+                                                           f"  revisit: {revisit}\n")
+                    + "\n**Alternatives rejected:** x\n")
+        self.store({"work/app/MEMORY.md": "- [PHP style](php-style.md) — tabs\n- [Due](due.md) — d\n- [Later](later.md) — l\n",
+                    "work/app/due.md": decision("due", "2020-01-01"), "work/app/later.md": decision("later", "2999-01-01")})
+        text = json.loads(self.hook("session-start", self.payload("session_start")))
+        text = text["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("1 decision(s) due for review: work/app/due", text)
+        self.assertNotIn("work/app/later", text.split("due for review")[1])
+
     def test_context_from_a_terminal_prints_text_and_links_nothing(self):
         self.store()
 

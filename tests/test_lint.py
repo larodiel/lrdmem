@@ -91,6 +91,15 @@ class LintTest(unittest.TestCase):
         fine = mem("g", body="**Why:** SHA-256 and UTF-8, a webapp\n**How to apply:** h\n")
         self.assertEqual(self.run_lint(clean(**{"_global/g.md": fine})), [])
 
+    def test_decision_memories_need_alternatives_and_a_valid_revisit_date(self):
+        body = "**Why:** w\n**How to apply:** h\n"
+        bad = mem("a", meta="  kind: decision\n", body=body)
+        self.has(clean(**{"work/app/a.md": bad}), "work/app/a.md: a decision needs an **Alternatives rejected:** line")
+        good = mem("a", meta="  kind: decision\n  revisit: 2027-03-01\n", body=body + "**Alternatives rejected:** x\n")
+        self.assertEqual(self.run_lint(clean(**{"work/app/a.md": good})), [])
+        late = good.replace("revisit: 2027-03-01", "revisit: soon")
+        self.has(clean(**{"work/app/a.md": late}), "metadata.revisit is not YYYY-MM-DD")
+
     def test_link_to_other_repo_same_env_resolves(self):
         files = clean(**{"work/other/MEMORY.md": index("o"), "work/other/o.md": mem("o"),
                          "work/app/a.md": mem(body="**Why:** w\n**How to apply:** h [[o]]\n")})

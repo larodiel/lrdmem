@@ -6,9 +6,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from lrdmem import config, consolidate, experience, revision, usage, write
-from lrdmem.model import Evidence
+from lrdmem.model import Evidence, today_utc
 from lrdmem.checks import CheckResult, pending, problem, run_checks
 from lrdmem.lint import INDEX_LINE, lint, printable
+from lrdmem.search import visible
 from lrdmem.recall import recall, render
 from lrdmem.session import Session
 from lrdmem.store import Store, store_root
@@ -175,6 +176,12 @@ def _session_start(inp: HookInput, s: _Scope) -> HookOutput:
         more = len(problems) - LINT_SHOWN
         more = f"\n- ...and {more} more (run `lrdmem lint {s.env}`)" if more > 0 else ""
         parts.append(f"## lrdmem lint: {len(problems)} problem(s); fix them when convenient\n{shown}{more}")
+    today = today_utc()
+    due = sorted(m.ref for m in s.store.memories() if m.kind == "decision" and m.revisit and m.revisit <= today
+                 and m.state in ("candidate", "active", "contested") and visible(m, s.env, s.repo))
+    if due:
+        parts.append(f"{len(due)} decision(s) due for review: {', '.join(due[:5])}"
+                     + (f" and {len(due) - 5} more" if len(due) > 5 else ""))
     waiting = [m for m in pending(s.store, s.cfg) if m.env in (None, s.env)]
     broken = sum(1 for m in waiting if problem(m))
     if len(waiting) > broken:

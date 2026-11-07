@@ -427,10 +427,16 @@ lrdmem config autopush on</pre></div></div>
         <li><code>associate</code> related memories, with signals</li>
         <li><code>list</code> every memory that applies here</li>
         <li><code>find</code> · <code>show</code> · <code>why</code></li>
-        <li><code>hot</code> · <code>stale</code> · <code>graph</code></li></ul></div>
+        <li><code>hot</code> · <code>stale</code> · <code>graph</code></li>
+        <li><code>usage</code> what hooks injected, what never fired</li>
+        <li><code>digest</code> what needs a human, for a scheduler</li>
+        <li><code>mcp</code> read-only server for chat apps</li>
+        <li><code>update</code> upgrade lrdmem, or check for a newer one</li></ul></div>
       <div class="card"><h3>Maintain</h3><ul>
         <li><code>consolidate</code> promote, contest, merge, queue</li>
         <li><code>revert</code> undo one revision</li>
+        <li><code>migrate</code> repair legacy memories</li>
+        <li><code>enroll</code> register a repo or a path</li>
         <li><code>allow</code> · <code>check</code> approved obligations</li>
         <li><code>sync</code> pull, commit, push</li>
         <li><code>install</code> · <code>config</code> · <code>lint</code></li></ul></div>
@@ -449,6 +455,7 @@ lrdmem config autopush on</pre></div></div>
       <li><strong>PR comments from your team only.</strong> Owners, members and collaborators of your own remotes.</li>
       <li><strong>Store content is untrusted.</strong> Git hooks, fsmonitor and submodules are off for every store call.</li>
       <li><strong>No surprise pushes.</strong> Autopush is opt-in; sync never force-pushes or autostashes.</li>
+      <li><strong>The MCP server only reads.</strong> No write tool; every argument is validated and never a flag or a path.</li>
       <li><strong>Memory is data, not instructions.</strong> Injected text says so, stripped of control characters.</li>
       <li><strong>Reversible install.</strong> Backs up what it edits and keeps hooks it didn't write.</li>
     </ul>

@@ -14,7 +14,7 @@ from lrdmem.store import (FORMAT_FILE, IGNORED, SUBFOLDERS, SUPPORTED_FORMAT, Ed
                           Revision, Store, StoreFormatError)
 
 TYPES = {"user", "feedback", "project", "reference"}
-KINDS = {"obligation", "pattern", "fact"}
+KINDS = {"obligation", "pattern", "fact", "decision"}
 CHECK_ON = {"stop", "post-edit"}
 SOURCES = {"chat", "pr"}
 # a tracker id such as PROJ-12; common standards like UTF-8 or SHA-256 are not ids
@@ -179,7 +179,7 @@ def _memory(m: Memory, text: str, known: set[str], store: Store) -> list[str]:
         out.append(f"metadata.memory_type must be one of {list(model.MEMORY_TYPES)}")
     if meta.get("state") is not None and meta["state"] not in model.STATES:
         out.append(f"metadata.state must be one of {list(model.STATES)}")
-    out += [f"metadata.{k} is not YYYY-MM-DD" for k in ("valid_from", "valid_until", "created")
+    out += [f"metadata.{k} is not YYYY-MM-DD" for k in ("valid_from", "valid_until", "created", "revisit")
             if meta.get(k) is not None and not _is_date(meta[k])]
     out += _evidence(store, m.data, m.env) + _computed(m.data, meta) + _scope(m, store) + ([] if m.type == "user" else _leaks(m, text, store))
     if not meta.get("author"):
@@ -190,6 +190,8 @@ def _memory(m: Memory, text: str, known: set[str], store: Store) -> list[str]:
     if m.type in ("feedback", "project") and m.memory_type != "episodic" and (
             "**Why:**" not in text or "**How to apply:**" not in text):
         out.append("needs **Why:** and **How to apply:** lines")
+    if m.kind == "decision" and "**Alternatives rejected:**" not in text:
+        out.append("a decision needs an **Alternatives rejected:** line")
     if "check" in m.data:
         c = m.check
         if m.kind != "obligation":

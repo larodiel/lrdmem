@@ -10,7 +10,7 @@ from pathlib import Path
 
 from lrdmem import write
 from lrdmem.frontmatter import parse
-from lrdmem.lint import KINDS, SOURCES, TICKET, has_secret
+from lrdmem.lint import KINDS, SOURCES, TICKET, _is_date, has_secret
 from lrdmem.model import today_utc, v01_memory_type
 from lrdmem.search import alike
 from lrdmem.store import AmbiguousRepo, Experience, Store, StoreFormatError, resolve
@@ -145,7 +145,8 @@ def learn(store: Store, cwd: Path, *, memory: str, mistake: str, correction: str
           source: str = "chat", files: list[str] = (), pr: str | None = None, kind: str | None = None,
           description: str | None = None, body: str | None = None, why: str | None = None, how: str | None = None,
           paths: list[str] = (), commands: list[str] = (), repos: list[str] = (), env: str | None = None,
-          new: bool = False, device: str = "") -> LearnResult:
+          new: bool = False, device: str = "", alternatives: str | None = None,
+          revisit: str | None = None) -> LearnResult:
     """Record an experience for `memory`, creating the memory when absent; raise LearnRefused on invalid input.
 
     A new memory needs description, body, why and how; paths, commands and repos become its triggers.
@@ -160,6 +161,12 @@ def learn(store: Store, cwd: Path, *, memory: str, mistake: str, correction: str
         raise LearnRefused(f"kind must be one of {sorted(KINDS)}")
     if not mistake.strip() or not correction.strip() or not agent.strip():
         raise LearnRefused("mistake, correction and agent are required")
+    if (alternatives or revisit) and kind != "decision":
+        raise LearnRefused("--alternatives and --revisit belong to --kind decision")
+    if revisit and not _is_date(revisit):
+        raise LearnRefused("--revisit must be a YYYY-MM-DD date")
+    if alternatives is not None and (not alternatives.strip() or "\n" in alternatives):
+        raise LearnRefused("--alternatives must be one non-empty line")
     oneline = {"agent": agent, "device": device, "pr": pr or "", "description": description or "",
                **{f"files[{i}]": f for i, f in enumerate(files)},
                **{f"{name}[{i}]": v for name, vals in (("paths", paths), ("commands", commands), ("repos", repos))
@@ -172,6 +179,10 @@ def learn(store: Store, cwd: Path, *, memory: str, mistake: str, correction: str
     folder, vis_env = scope_folder(store, cwd, scope, env)
     path = folder / f"{memory}.md"
     exists = path.exists()
+    if kind == "decision" and not exists:
+        if not (alternatives or "").strip():
+            raise LearnRefused("a decision needs --alternatives: what was weighed and rejected")
+        body = f"{(body or '').rstrip()}\n\n**Alternatives rejected:** {alternatives.strip()}"
     if not exists and not all(v and v.strip() for v in (description, body, why, how)):
         raise LearnRefused(f"memory '{memory}' does not exist in this scope; description, body, why and how "
                            "are required")
@@ -219,7 +230,7 @@ def learn(store: Store, cwd: Path, *, memory: str, mistake: str, correction: str
             raise LearnRefused(r.refused[0][1])
         created = bool(r.created)
         if created and kind:
-            write.set_fields(path, {"kind": kind})
+            write.set_fields(path, {"kind": kind, **({"revisit": revisit} if revisit else {})})
         hint = ""
         if not created:
             _touch(path, today_utc())

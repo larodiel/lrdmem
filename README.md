@@ -73,7 +73,7 @@ flowchart LR
 ## What you get
 
 - **One store, three harnesses.** Claude Code, Codex CLI and OpenCode run the same hooks through one entry point,
-  as a plugin or wired by `lrdmem install`.
+  as a plugin or wired by `lrdmem install`. Apps without hooks, such as a chat window, read it through `lrdmem mcp`.
 - **Learns from chat, PR reviews and check runs.** The bundled skill teaches agents to record corrections with
   `lrdmem learn`; `lrdmem learn-pr <url>` turns your review comments into experiences; hooks record every
   obligation check that passes or fails.
@@ -82,10 +82,15 @@ flowchart LR
   for every change, all computed from evidence.
 - **A brain you can query.** `recall`, `associate`, `find`, `show`, `why` (the timeline behind a rule), `hot`,
   `stale`, and `graph` to an HTML, JSON or DOT map.
+- **It measures itself.** Hooks log what they injected; `usage` shows which memories earn their place and which never
+  fire, and `digest` is one read-only summary a scheduler can run. A correction on an existing rule says why it was
+  broken (index only, triggers missed, or matched anyway). `migrate` repairs memories written before the v2 model.
+- **Decisions, not just rules.** `learn --kind decision` keeps the alternatives rejected and a date to revisit it.
 - **Plain Markdown in git.** Every memory is a file you can read, edit, review and revert. `[[links]]` between
   memories work in Obsidian too. Every automatic commit follows Conventional Commits.
-- **Scoped by environment.** Keep `work/` and `personal/` apart, each its own repo, shareable on its own.
-  Company-wide rules live in `<env>/_global/`; facts about you in `_global/`.
+- **Scoped by environment and repo.** Keep `work/` and `personal/` apart, each its own repo, shareable on its own.
+  Company-wide rules live in `<env>/_global/`, facts about you in `_global/`, and a memory's `triggers.repos` also
+  keeps its line out of the session index of other repos. Lint and `learn` refuse repository details in `_global/`.
 - **Sync your way.** `lrdmem sync` when you want, or autopush per device and per environment.
 - **Zero dependencies.** Python 3.11+ standard library only. Hooks answer in about 100 ms.
 
@@ -401,7 +406,7 @@ options of any command.
 | Look up | `recall` · `associate` · `for` | what applies to a task, file or command, and why |
 | | `list` | the memories that apply here, an environment's, or all, with type, state and confidence |
 | | `find` · `show` · `why` | search, read a memory, see its history |
-| | `hot` · `usage` · `migrate` · `stale` · `graph` · `lint` | repeated lessons, what hooks injected, dead paths, the map, store checks |
+| | `hot` · `usage` · `digest` · `migrate` · `mcp` · `update` · `stale` · `graph` · `lint` | repeated lessons, what hooks injected, dead paths, the map, store checks |
 | Lifecycle | `consolidate` | promote, contest, merge, and decide queued judgments |
 | | `revert` | undo one recorded change |
 | Obligations | `allow` · `check` | approve check commands, run them |
@@ -438,6 +443,15 @@ which environment the project belongs to; the skill does this when `learn` says 
 
 Prints this device's configuration as JSON.
 
+#### `lrdmem mcp`
+
+`lrdmem mcp [--cwd DIR]`: a read-only [MCP](https://modelcontextprotocol.io) server on stdio, for apps without hooks,
+such as a chat window. Tools: `memory_find`, `memory_show`, `memory_why`, `memory_list` and `memory_recall` (which
+works from `--cwd`, or the directory the server starts in). Arguments are validated and never become flags or paths,
+answers are labelled as reference data and capped at 20,000 characters, and there is no write tool: memories are
+recorded by the hooks and `lrdmem learn`. Add it to a client's config as
+`{"mcpServers": {"lrdmem": {"command": "lrdmem", "args": ["mcp", "--cwd", "/path/to/repo"]}}}`.
+
 #### `lrdmem install`
 
 `lrdmem install --agent claude|codex|opencode [--dry-run]`: wires lrdmem's hooks (or the OpenCode plugin) and the
@@ -459,7 +473,8 @@ memory when it is new. A correction is active immediately.
 | `--agent NAME` | who made the mistake (required) |
 | `--source chat\|pr`, `--pr URL` | where the correction came from |
 | `--files F...` | files involved |
-| `--kind obligation\|pattern\|fact` | the memory's kind; `obligation` can carry a check |
+| `--kind obligation\|pattern\|fact\|decision` | the memory's kind; `obligation` can carry a check; a `decision` records a choice |
+| `--alternatives TEXT`, `--revisit DATE` | decision: what was weighed and rejected (one line, required), and the `YYYY-MM-DD` to review it again |
 | `--description`, `--body`, `--why`, `--how` | the new memory's text (required for a new memory) |
 | `--paths`, `--commands`, `--repos` | triggers: globs, command prefixes, repos (repeat or comma-separate; env scope needs `--repos`). On an existing memory they are merged into its triggers |
 | `--new` | create it even when similar memories exist (otherwise learn refuses and lists them) |
@@ -572,6 +587,23 @@ number of revisions.
 `lrdmem hot [--min N]`: memories reinforced by at least N independent experiences (default 3), ranked by confidence
 times support. These are the rules that keep being broken: candidates for an obligation with a check.
 
+#### `lrdmem update`
+
+`lrdmem update [--check]`: upgrades lrdmem with the tool that installed it (`uv tool upgrade lrdmem` or
+`pipx upgrade lrdmem`, run without a shell), and tells you to update the Claude Code and Codex plugins separately.
+`--check` only asks PyPI whether a newer release exists: it exits 1 when there is one, 0 when you are current and 2 when
+PyPI cannot be read. A copy installed any other way prints the command to run instead. This is the only command that
+reaches the network for anything but git, and no hook ever runs it.
+
+#### `lrdmem digest`
+
+`lrdmem digest [--days N] [--json]`: one read-only summary of what needs a human: lint problems, pending
+consolidation decisions, stale paths, decisions past their `--revisit` date, and memories whose triggers never
+fired. Each line names the command that shows it; it prints `ok: nothing needs attention` and exits 0 when there is
+nothing, and exits 1 otherwise, so a scheduler can alert on it. Consolidation already runs at the end of every task;
+digest changes nothing. Run it from cron or any scheduler, for example `0 9 * * 1 lrdmem digest || notify-send lrdmem`.
+Session start also lists decisions that are due.
+
 #### `lrdmem usage`
 
 `lrdmem usage [--days N] [--json]`: what the hooks injected in the last N days (default 30): sessions per repo,
@@ -601,7 +633,8 @@ interactive HTML page (default), JSON or Graphviz DOT, to stdout or a file.
 #### `lrdmem lint`
 
 `lrdmem lint [ENV]`: checks the store: frontmatter, slugs, `MEMORY.md` indexes, evidence and relation refs,
-secrets, cited paths, and experiences edited after their first commit. It also checks scope: an environment-wide
+secrets, cited paths, and experiences edited after their first commit. A `kind: decision` memory needs an
+`**Alternatives rejected:**` line and, when set, a `metadata.revisit` date. It also checks scope: an environment-wide
 memory whose description starts with a scope such as `Acme repos:` needs `triggers.repos`, `triggers.repos` must name
 at least one repository folder of the store, and the root `_global/` (about the user) must not name a repository of
 the store or a ticket id. Exits 1 on problems.

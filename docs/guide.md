@@ -6,9 +6,12 @@ The full reference. For the pitch and quick start, see the [README](../README.md
 
 ```
 lrdmem list | find TERM | show SLUG | why SLUG | hot | stale   # read the store
+lrdmem usage [--days N] [--json] | digest [--days N] [--json]   # what hooks injected; what needs a human (exit 1)
+lrdmem update [--check]                                    # upgrade lrdmem (uv or pipx), or ask PyPI for a newer one
 lrdmem recall [QUERY] [--file F] [--command C] [--json]    # most relevant memories, with signals and relations
 lrdmem for FILE [--command CMD]                           # what a hook injects for a file or command
 lrdmem learn ... | learn-pr URL --agent NAME              # record corrections (active right away)
+lrdmem learn --kind decision --alternatives TEXT [--revisit DATE] ...  # record a choice and what was rejected
 lrdmem experience add --kind K --agent A TEXT             # record what happened (immutable)
 lrdmem associate [QUERY] [--file F]                       # memories related to a candidate, with signals
 lrdmem memory propose --agent me < payload.json          # validated candidates from an experience
@@ -16,6 +19,9 @@ lrdmem feedback REF useful|incorrect|irrelevant           # signal on a recalled
 lrdmem consolidate [--queue | --resolve ITEM DECISION]    # automatic consolidation and the judgment queue
 lrdmem revert REVISION                                    # undo one recorded change
 lrdmem lint | graph --format html|json|dot -o OUT         # check and visualise the store
+lrdmem migrate [--infer-triggers] [--apply] [--env ENV]    # repair legacy memories (dry run unless --apply)
+lrdmem enroll [--env ENV] | config enroll PATH ENV        # register a repo, or a path whose repos enrol on first use
+lrdmem mcp [--cwd DIR]                                    # read-only MCP server on stdio for apps without hooks
 lrdmem allow [SLUG] | check --on stop|post-edit --files F...  # approve and run obligation checks
 lrdmem sync [ENV]                                         # commit, pull and push the store
 lrdmem config set store PATH | set device NAME | autopush on|off [--env ENV] | show
@@ -158,6 +164,26 @@ All three run the same handlers through `lrdmem hook <phase> --agent claude|code
 up every file it edits, keeps every hook it didn't write, and edits symlinked configs through the link. OpenCode also
 reads the Claude and `~/.agents` skill folders, so after installing for several agents it may list the lrdmem skill
 twice; that is harmless.
+
+## Measuring and tending the store
+
+Hooks append what they inject to `recalls.jsonl` beside the device config (never in the store; it trims itself at
+1 MB). `lrdmem usage` reads it: injections per memory, and the memories whose file or command triggers never fired.
+`lrdmem digest` adds lint problems, pending consolidation decisions, stale paths and decisions past their revisit
+date, exits 1 when something needs a person, and changes nothing, so it fits a weekly cron entry.
+
+When `learn` reinforces a memory that already existed, the rule was broken: it prints a `hint:` saying whether the
+rule was index only (add `--paths` or `--commands`, which now merge into an existing memory), its triggers missed
+the files, or it matched and was broken anyway (see `hot`). `lrdmem migrate` moves `author`, `updated` and friends
+written outside `metadata:` back under it and, with `--infer-triggers`, proposes `triggers.paths` from the files a
+memory names; read the dry run before `--apply`.
+
+## Apps without hooks
+
+`lrdmem mcp [--cwd DIR]` is a read-only [MCP](https://modelcontextprotocol.io) server on stdio with `memory_find`,
+`memory_show`, `memory_why`, `memory_list` and `memory_recall`. Point a client at it, for example in Claude Desktop's
+`claude_desktop_config.json`: `{"mcpServers": {"lrdmem": {"command": "lrdmem", "args": ["mcp", "--cwd", "/path/to/repo"]}}}`.
+It has no write tool; record memories from an agent with hooks or with `lrdmem learn`.
 
 ## Migrating from bin/memory
 

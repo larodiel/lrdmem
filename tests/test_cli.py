@@ -2,6 +2,7 @@ import io
 import unittest
 from contextlib import redirect_stdout
 
+from lrdmem import __version__
 from lrdmem.cli import main
 
 
@@ -11,7 +12,7 @@ class CliTest(unittest.TestCase):
         with redirect_stdout(out), self.assertRaises(SystemExit) as cm:
             main(["--version"])
         self.assertEqual(cm.exception.code, 0)
-        self.assertEqual(out.getvalue().strip(), "lrdmem 0.1.0")
+        self.assertEqual(out.getvalue().strip(), f"lrdmem {__version__}")
 
 
     def test_unconfigured_store_is_one_clear_line(self):
