@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from lrdmem import __version__, checks, config, consolidate, digest, evidence, experience, mcp, migrate, propose, recall, revision, usage, write
+from lrdmem import __version__, checks, config, consolidate, digest, evidence, experience, mcp, migrate, propose, recall, revision, update, usage, write
 from lrdmem.export import to_dot, to_html, to_json
 from lrdmem.graph import AmbiguousSlug, Graph
 from lrdmem.hooks import HookInput, dispatch, handle
@@ -825,6 +825,8 @@ def _main(argv: list[str] | None) -> int:
     p.add_argument("--agent", default="claude", help="claude, codex or opencode")
     sub.add_parser("context", help="same as `hook session-start`").add_argument(
         "--agent", default="claude", help="claude, codex or opencode")
+    p = sub.add_parser("update", help="upgrade lrdmem through uv or pipx, or --check PyPI for a newer version")
+    p.add_argument("--check", action="store_true", help="only report whether a newer version exists (exit 1 if so)")
     p = sub.add_parser("mcp", help="serve the store read-only to MCP clients over stdio")
     p.add_argument("--cwd", help="repository directory `memory_recall` works from (default: the current one)")
     p = sub.add_parser("install", help="install lrdmem's hooks and skill into a harness's user config")
@@ -837,6 +839,8 @@ def _main(argv: list[str] | None) -> int:
         return _context(args.agent)
     if args.command == "mcp":
         return _mcp(args.cwd)
+    if args.command == "update":
+        return update.run(args.check)
     if args.command == "config":
         return _config(args)
     if args.command == "install":

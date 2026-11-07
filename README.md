@@ -406,7 +406,7 @@ options of any command.
 | Look up | `recall` · `associate` · `for` | what applies to a task, file or command, and why |
 | | `list` | the memories that apply here, an environment's, or all, with type, state and confidence |
 | | `find` · `show` · `why` | search, read a memory, see its history |
-| | `hot` · `usage` · `digest` · `migrate` · `mcp` · `stale` · `graph` · `lint` | repeated lessons, what hooks injected, dead paths, the map, store checks |
+| | `hot` · `usage` · `digest` · `migrate` · `mcp` · `update` · `stale` · `graph` · `lint` | repeated lessons, what hooks injected, dead paths, the map, store checks |
 | Lifecycle | `consolidate` | promote, contest, merge, and decide queued judgments |
 | | `revert` | undo one recorded change |
 | Obligations | `allow` · `check` | approve check commands, run them |
@@ -586,6 +586,14 @@ number of revisions.
 
 `lrdmem hot [--min N]`: memories reinforced by at least N independent experiences (default 3), ranked by confidence
 times support. These are the rules that keep being broken: candidates for an obligation with a check.
+
+#### `lrdmem update`
+
+`lrdmem update [--check]`: upgrades lrdmem with the tool that installed it (`uv tool upgrade lrdmem` or
+`pipx upgrade lrdmem`, run without a shell), and tells you to update the Claude Code and Codex plugins separately.
+`--check` only asks PyPI whether a newer release exists: it exits 1 when there is one, 0 when you are current and 2 when
+PyPI cannot be read. A copy installed any other way prints the command to run instead. This is the only command that
+reaches the network for anything but git, and no hook ever runs it.
 
 #### `lrdmem digest`
 

@@ -43,6 +43,7 @@ actionlint .github/workflows/*.yml                       # after editing workflo
 | `learn.py`, `pr.py` | writing contexts/memories (global scope refuses repo specifics; violation hints; decisions); PR review ingestion |
 | `usage.py`, `digest.py` | the device-local recall log and `usage` report; the read-only `digest` for scheduled runs |
 | `migrate.py` | repairs legacy memories: misplaced metadata, inferred `triggers.paths` (dry run unless `--apply`) |
+| `update.py` | `lrdmem update`: upgrade through uv/pipx with fixed argv; `--check` reads the version from PyPI, validated as `N.N.N` |
 | `mcp.py` | read-only MCP server over stdio: fixed, validated calls of the CLI, no write tool |
 | `checks.py`, `config.py` | obligation approval (hash allowlist) and execution; device config |
 | `sync.py` | git pull/commit/push per environment repo |
@@ -100,6 +101,8 @@ Changes must keep all of these true. A change that weakens one needs an explicit
 9. `mcp` stays read-only: no write tool, arguments validated and never flags or paths, answers labelled as reference
    data, stripped of control characters and capped. The recall log (`usage.py`) lives beside the device config, never
    in the store, and a failure to write it never reaches the agent.
+10. The only network call that is not git is `lrdmem update`, run by the user: one fixed PyPI URL, a timeout, a size cap,
+    a version accepted only as `N.N.N`; the installer runs with fixed argv and no shell. No hook ever calls it.
 
 ## Installing lrdmem for a user
 

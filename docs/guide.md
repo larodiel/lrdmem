@@ -7,6 +7,7 @@ The full reference. For the pitch and quick start, see the [README](../README.md
 ```
 lrdmem list | find TERM | show SLUG | why SLUG | hot | stale   # read the store
 lrdmem usage [--days N] [--json] | digest [--days N] [--json]   # what hooks injected; what needs a human (exit 1)
+lrdmem update [--check]                                    # upgrade lrdmem (uv or pipx), or ask PyPI for a newer one
 lrdmem recall [QUERY] [--file F] [--command C] [--json]    # most relevant memories, with signals and relations
 lrdmem for FILE [--command CMD]                           # what a hook injects for a file or command
 lrdmem learn ... | learn-pr URL --agent NAME              # record corrections (active right away)
