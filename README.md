@@ -401,7 +401,7 @@ options of any command.
 | Look up | `recall` · `associate` · `for` | what applies to a task, file or command, and why |
 | | `list` | the memories that apply here, an environment's, or all, with type, state and confidence |
 | | `find` · `show` · `why` | search, read a memory, see its history |
-| | `hot` · `usage` · `migrate` · `mcp` · `stale` · `graph` · `lint` | repeated lessons, what hooks injected, dead paths, the map, store checks |
+| | `hot` · `usage` · `digest` · `migrate` · `mcp` · `stale` · `graph` · `lint` | repeated lessons, what hooks injected, dead paths, the map, store checks |
 | Lifecycle | `consolidate` | promote, contest, merge, and decide queued judgments |
 | | `revert` | undo one recorded change |
 | Obligations | `allow` · `check` | approve check commands, run them |
@@ -468,7 +468,8 @@ memory when it is new. A correction is active immediately.
 | `--agent NAME` | who made the mistake (required) |
 | `--source chat\|pr`, `--pr URL` | where the correction came from |
 | `--files F...` | files involved |
-| `--kind obligation\|pattern\|fact` | the memory's kind; `obligation` can carry a check |
+| `--kind obligation\|pattern\|fact\|decision` | the memory's kind; `obligation` can carry a check; a `decision` records a choice |
+| `--alternatives TEXT`, `--revisit DATE` | decision: what was weighed and rejected (one line, required), and the `YYYY-MM-DD` to review it again |
 | `--description`, `--body`, `--why`, `--how` | the new memory's text (required for a new memory) |
 | `--paths`, `--commands`, `--repos` | triggers: globs, command prefixes, repos (repeat or comma-separate; env scope needs `--repos`). On an existing memory they are merged into its triggers |
 | `--new` | create it even when similar memories exist (otherwise learn refuses and lists them) |
@@ -581,6 +582,15 @@ number of revisions.
 `lrdmem hot [--min N]`: memories reinforced by at least N independent experiences (default 3), ranked by confidence
 times support. These are the rules that keep being broken: candidates for an obligation with a check.
 
+#### `lrdmem digest`
+
+`lrdmem digest [--days N] [--json]`: one read-only summary of what needs a human: lint problems, pending
+consolidation decisions, stale paths, decisions past their `--revisit` date, and memories whose triggers never
+fired. Each line names the command that shows it; it prints `ok: nothing needs attention` and exits 0 when there is
+nothing, and exits 1 otherwise, so a scheduler can alert on it. Consolidation already runs at the end of every task;
+digest changes nothing. Run it from cron or any scheduler, for example `0 9 * * 1 lrdmem digest || notify-send lrdmem`.
+Session start also lists decisions that are due.
+
 #### `lrdmem usage`
 
 `lrdmem usage [--days N] [--json]`: what the hooks injected in the last N days (default 30): sessions per repo,
@@ -610,7 +620,8 @@ interactive HTML page (default), JSON or Graphviz DOT, to stdout or a file.
 #### `lrdmem lint`
 
 `lrdmem lint [ENV]`: checks the store: frontmatter, slugs, `MEMORY.md` indexes, evidence and relation refs,
-secrets, cited paths, and experiences edited after their first commit. It also checks scope: an environment-wide
+secrets, cited paths, and experiences edited after their first commit. A `kind: decision` memory needs an
+`**Alternatives rejected:**` line and, when set, a `metadata.revisit` date. It also checks scope: an environment-wide
 memory whose description starts with a scope such as `Acme repos:` needs `triggers.repos`, `triggers.repos` must name
 at least one repository folder of the store, and the root `_global/` (about the user) must not name a repository of
 the store or a ticket id. Exits 1 on problems.

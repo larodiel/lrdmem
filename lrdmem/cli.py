@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from lrdmem import __version__, checks, config, consolidate, evidence, experience, mcp, migrate, propose, recall, revision, usage, write
+from lrdmem import __version__, checks, config, consolidate, digest, evidence, experience, mcp, migrate, propose, recall, revision, usage, write
 from lrdmem.export import to_dot, to_html, to_json
 from lrdmem.graph import AmbiguousSlug, Graph
 from lrdmem.hooks import HookInput, dispatch, handle
@@ -196,6 +196,19 @@ def _migrate(store: Store, g: Graph, args) -> int:
     return 1 if failed else 0
 
 
+def _digest(store: Store, g: Graph, args) -> int:
+    r = digest.build(store, args.days)
+    if args.json:
+        _out(json.dumps(r))
+    else:
+        found = digest.lines(r)
+        for line in found:
+            _out(line)
+        if not found:
+            _out("ok: nothing needs attention")
+    return 1 if digest.lines(r) else 0
+
+
 def _mcp(cwd: str | None) -> int:
     if cwd:
         try:
@@ -346,7 +359,7 @@ def _learn(store: Store, g: Graph, args) -> int:
                   scope=args.scope, agent=args.agent, source=args.source, files=args.files, pr=args.pr,
                   kind=args.kind, description=args.description, body=args.body, why=args.why, how=args.how,
                   paths=_csv(args.paths), commands=_csv(args.commands), repos=_csv(args.repos), env=args.env,
-                  new=args.new,
+                  new=args.new, alternatives=args.alternatives, revisit=args.revisit,
                   device=config.load()["device"])
     except LearnRefused as e:
         print(printable(str(e)), file=sys.stderr)
@@ -671,6 +684,10 @@ def _main(argv: list[str] | None) -> int:
     p.add_argument("--env")
     p.add_argument("--infer-triggers", action="store_true", help="add triggers.paths from the files a memory names")
     p.add_argument("--apply", action="store_true")
+    p = sub.add_parser("digest", help="what in the store needs a human; read-only, exit 1 when something does")
+    p.set_defaults(fn=_digest)
+    p.add_argument("--days", type=int, default=30)
+    p.add_argument("--json", action="store_true")
     p = sub.add_parser("stale", help="list memories citing paths that no longer exist")
     p.set_defaults(fn=_stale)
     p = sub.add_parser("graph", help="export the memory graph")
@@ -724,7 +741,9 @@ def _main(argv: list[str] | None) -> int:
     p.add_argument("--source", choices=["chat", "pr"], default="chat")
     p.add_argument("--files", nargs="*", default=[])
     p.add_argument("--pr")
-    p.add_argument("--kind", choices=["obligation", "pattern", "fact"])
+    p.add_argument("--kind", choices=["obligation", "pattern", "fact", "decision"])
+    p.add_argument("--alternatives", help="decision: what was weighed and rejected (one line)")
+    p.add_argument("--revisit", help="decision: YYYY-MM-DD to review it again")
     p.add_argument("--description")
     p.add_argument("--body")
     p.add_argument("--why", help="new memory: why the rule exists")

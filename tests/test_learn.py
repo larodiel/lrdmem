@@ -215,6 +215,24 @@ class LearnTest(unittest.TestCase):
         self.assertEqual(parse(r.memory.read_text())["triggers"], {"paths": ["a/*.py", "b/*.py"], "commands": ["make"]})
         self.assertEqual(r.hint, "")  # the agent already fixed what the hint would ask for
 
+    def test_decision_memory_keeps_alternatives_and_revisit_date(self):
+        r = self.learn(memory="spaces", **dict(NEW, kind="decision", alternatives="tabs: harder to align",
+                                               revisit="2027-03-01"))
+        m = parse(r.memory.read_text())
+        self.assertEqual((m["metadata"]["kind"], m["metadata"]["revisit"]), ("decision", "2027-03-01"))
+        self.assertIn("**Alternatives rejected:** tabs: harder to align", r.memory.read_text())
+        from lrdmem.lint import lint
+        self.assertEqual(lint(self.store), [])
+
+    def test_decision_needs_alternatives_and_a_real_date(self):
+        with self.assertRaises(LearnRefused):
+            self.learn(memory="spaces", **dict(NEW, kind="decision"))
+        with self.assertRaises(LearnRefused):
+            self.learn(memory="spaces", **dict(NEW, kind="decision", alternatives="x", revisit="soon"))
+        with self.assertRaises(LearnRefused):
+            self.learn(memory="spaces", **dict(NEW, kind="pattern", alternatives="x"))
+        self.assertFalse((self.root / "acme/web/spaces.md").exists())
+
     def test_links_must_resolve(self):
         with self.assertRaises(LearnRefused):
             self.learn(memory="spaces", **dict(NEW, body="**Why:** [[nope]]"))

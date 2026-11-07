@@ -140,6 +140,11 @@ class Memory:
         return _str(_meta(self.data).get("valid_until"))
 
     @property
+    def revisit(self) -> str:
+        """The day a decision should be reviewed again, or an empty string."""
+        return _str(_meta(self.data).get("revisit"))
+
+    @property
     def created(self) -> str:
         """Creation date, or an empty string."""
         return _str(_meta(self.data).get("created"))
