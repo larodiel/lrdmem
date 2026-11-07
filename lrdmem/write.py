@@ -338,3 +338,92 @@ def add_evidence(path: Path, item: Evidence) -> bool:
     rendered = dump({"e": [entry]}).split("\n")[1][len("e: ["):-1]
     guard(rendered)
     return _edit(path, lambda text: _append(text, entry, rendered))
+
+
+def _triggers(text: str, add: dict[str, list[str]]) -> str | None:
+    data = split(text)[0]
+    lines = text.split("\n")
+    scan = _scan(lines) if data is not None else None
+    if scan is None:
+        return None
+    end, top = scan[0], scan[1]
+    old = data.get("triggers")
+    if old is not None and not isinstance(old, dict):
+        return None
+    old = old or {}
+    cr = "\r" if lines[0].endswith("\r") else ""
+    merged = {}
+    for key, new in add.items():
+        have = old.get(key, [])
+        if not isinstance(have, list) or not all(isinstance(x, str) for x in have):
+            return None  # a scalar or block list: not ours to edit
+        merged[key] = have + [x for x in dict.fromkeys(new) if x not in have]
+    section = top.get("triggers")
+    for key, values in merged.items():
+        if values == old.get(key, []):
+            continue
+        row = "  " + dump({key: values}).split("\n")[1] + cr
+        if section is None:
+            lines[end:end] = ["triggers:" + cr, row]
+            section, end = end, end + 2
+            continue
+        stop = next((i for i in range(section + 1, end) if lines[i].strip() and lines[i][0] not in " \t"), end)
+        at = next((i for i in range(section + 1, stop) if lines[i].lstrip().startswith(f"{key}:")), None)
+        if at is not None:
+            lines[at] = row
+        else:
+            last = max(i for i in range(section, stop) if lines[i].strip())
+            lines.insert(last + 1, row)
+            end += 1
+    new = "\n".join(lines)
+    got = (split(new)[0] or {}).get("triggers") or {}
+    return new if all(got.get(k) == v for k, v in merged.items()) else None
+
+
+def add_triggers(path: Path, add: dict[str, list[str]]) -> bool:
+    """Merge `paths`, `commands` or `repos` values into the memory's inline `triggers:` lists, line by line.
+
+    New values go after the existing ones, duplicates are dropped, a missing list or section is created, and no
+    other line changes (CRLF kept). False, writing nothing, when the header is unparseable or a list is not
+    inline. Refused on a secret.
+    """
+    for key, values in add.items():
+        guard(f"{key}: " + "\n".join(values))
+    return _edit(path, lambda text: _triggers(text, add))
+
+
+def _hoist(text: str, keys: list[str]) -> str | None:
+    data = split(text)[0]
+    lines = text.split("\n")
+    scan = _scan(lines) if data is not None else None
+    if scan is None:
+        return None
+    end, top, meta, _ = scan
+    move = [k for k in keys if k in top]
+    if any(k in meta or not lines[top[k]].partition(":")[2].strip() for k in move):
+        return None  # already under metadata, or a section: not ours to move
+    if not move:
+        return text
+    cr = "\r" if lines[0].endswith("\r") else ""
+    rows = [lines[top[k]].strip().rstrip("\r") for k in move]
+    for k in sorted(move, key=top.get, reverse=True):
+        del lines[top[k]]
+    end, top, meta, meta_end = _scan(lines)
+    if meta_end is not None:
+        lines[meta_end + 1:meta_end + 1] = ["  " + r + cr for r in rows]
+    else:
+        lines[end:end] = ["metadata:" + cr, *["  " + r + cr for r in rows]]
+    new = "\n".join(lines)
+    got = split(new)[0] or {}
+    old = {k: data[k] for k in move}
+    meta_now = got.get("metadata") if isinstance(got.get("metadata"), dict) else {}
+    return new if all(k not in got and meta_now.get(k) == v for k, v in old.items()) else None
+
+
+def move_into_metadata(path: Path, keys: list[str]) -> bool:
+    """Move top-level scalar keys (an agent wrote `author:` or `updated:` outside `metadata:`) into the memory's
+    `metadata:` section, creating it when absent; keys that are not there are skipped and no other line changes.
+
+    False, writing nothing, when the header is unparseable, a key is also under metadata, or its line is a section.
+    """
+    return _edit(path, lambda text: _hoist(text, keys))

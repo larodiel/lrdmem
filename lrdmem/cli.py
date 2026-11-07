@@ -6,12 +6,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-from lrdmem import __version__, checks, config, consolidate, evidence, experience, propose, recall, revision, write
+from lrdmem import __version__, checks, config, consolidate, evidence, experience, migrate, propose, recall, revision, usage, write
 from lrdmem.export import to_dot, to_html, to_json
 from lrdmem.graph import AmbiguousSlug, Graph
 from lrdmem.hooks import HookInput, dispatch, handle
 from lrdmem.install import AGENTS, InstallError, install
-from lrdmem.learn import LearnRefused, learn
+from lrdmem.learn import LearnRefused, learn, refuse_repo_specifics
 from lrdmem.lint import lint, printable
 from lrdmem.pr import learn_pr
 from lrdmem.session import Session
@@ -158,6 +158,41 @@ def _hot(store: Store, g: Graph, args) -> int:
     for m, n in g.hot(args.min):
         _out(f"{_rel(store, m)}  {n}" + ("  [candidate: obligation]" if m.kind == "pattern" else ""))
     return 0
+
+
+def _usage(store: Store, g: Graph, args) -> int:
+    r = usage.report(store, args.days)
+    if args.json:
+        _out(json.dumps(r))
+        return 0
+    _out(f"last {r['days']} days; sessions: " + (", ".join(f"{k} {v}" for k, v in sorted(r["sessions"].items())) or "none"))
+    for ref, n, last in r["injected"]:
+        _out(f"{ref}  {n}  last {last}")
+    for title, key in (("triggers never fired", "unused_triggered"), ("index only, no file or command triggers", "index_only")):
+        if r[key]:
+            _out(f"\n{title} ({len(r[key])}):")
+            for ref in r[key]:
+                _out(f"  {ref}")
+    return 0
+
+
+def _migrate(store: Store, g: Graph, args) -> int:
+    changes = migrate.plan(store, args.env, args.infer_triggers)
+    for c in changes:
+        ref = c.memory.ref
+        if c.hoist:
+            _out(f"{ref}: move {', '.join(c.hoist)} into metadata")
+        if c.paths:
+            _out(f"{ref}: triggers.paths += {c.paths}")
+        if c.large:
+            _out(f"{ref}: large ({len(c.memory.body)} characters); consider splitting it (not changed)")
+    if not args.apply:
+        _out(f"dry run: {len(changes)} memories; pass --apply to write")
+        return 0
+    failed = migrate.apply(store, [c for c in changes if c.hoist or c.paths])
+    for ref in failed:
+        print(printable(f"{ref}: could not edit its header safely; left as it was"), file=sys.stderr)
+    return 1 if failed else 0
 
 
 def _repo_relative(file: str | None) -> str | None:
@@ -310,6 +345,8 @@ def _learn(store: Store, g: Graph, args) -> int:
     _out(r.context.relative_to(store.root).as_posix())
     if r.created:
         _out(r.memory.relative_to(store.root).as_posix())
+    if r.hint:
+        print(printable(f"hint: {r.hint}"), file=sys.stderr)
     return 0
 
 
@@ -342,6 +379,11 @@ def _experience(store: Store, g: Graph, args) -> int:
                 fields.update({k: v for k, v in raw.items() if v is not None})
         if not isinstance(fields.get("text"), str):
             raise experience.Refused("text is required (argument or JSON on stdin)")
+        if fields.get("scope") == "global":
+            try:
+                refuse_repo_specifics(store, Path.cwd(), fields.get("env"), fields["text"], fields.get("files") or [])
+            except LearnRefused as err:
+                raise experience.Refused(str(err)) from None
         e, created = experience.add(
             store, Path.cwd(), kind=fields.get("kind") or "", agent=fields.get("agent") or "", text=fields["text"],
             scope=fields.get("scope") or "repo", files=fields.get("files") or [],
@@ -609,6 +651,15 @@ def _main(argv: list[str] | None) -> int:
         else:
             p.add_argument("slug")
             p.add_argument("--env")
+    p = sub.add_parser("usage", help="which memories hooks injected, and which never earned their place")
+    p.set_defaults(fn=_usage)
+    p.add_argument("--days", type=int, default=30)
+    p.add_argument("--json", action="store_true")
+    p = sub.add_parser("migrate", help="repair memories written before the v2 model (dry run unless --apply)")
+    p.set_defaults(fn=_migrate)
+    p.add_argument("--env")
+    p.add_argument("--infer-triggers", action="store_true", help="add triggers.paths from the files a memory names")
+    p.add_argument("--apply", action="store_true")
     p = sub.add_parser("stale", help="list memories citing paths that no longer exist")
     p.set_defaults(fn=_stale)
     p = sub.add_parser("graph", help="export the memory graph")

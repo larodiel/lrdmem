@@ -175,6 +175,46 @@ class LearnTest(unittest.TestCase):
         r = self.learn(memory="spaces", **dict(home, scope="global"))
         self.assertEqual(r.memory.parent, self.root / "_global")
 
+    def test_global_scope_refuses_what_belongs_to_a_repository(self):
+        for name, over in {"files": dict(files=["src/a.php"]),
+                           "ticket id": dict(mistake="fixed PROJ-123 wrongly"),
+                           "repo name": dict(correction="in the web repo use spaces"),
+                           "repo name in the body": dict(body="Applies to Web only.")}.items():
+            with self.subTest(name), self.assertRaises(LearnRefused) as cm:
+                self.learn(memory="spaces", **dict(NEW, scope="global", **over))
+            self.assertIn("--scope repo", str(cm.exception))
+        self.assertFalse((self.root / "_global/spaces.md").exists())
+        self.assertFalse((self.root / "_global/experiences").exists())
+
+    def test_global_scope_still_accepts_a_fact_about_the_user(self):
+        self.assertTrue(self.learn(memory="spaces", **dict(NEW, scope="global", mistake="webinar notes in english")).created)
+
+    def violation(self, triggers="", **over):
+        """Learn a memory, then a second correction on it: the rule existed and was broken."""
+        self.learn(memory="spaces", **dict(NEW, **({"paths": [triggers]} if triggers else {})))
+        return self.learn(memory="spaces", **dict(KW, **over))
+
+    def test_violation_of_an_index_only_memory_says_to_add_triggers(self):
+        r = self.violation(files=["src/Tables/a.php"])
+        self.assertIn("index only", r.hint)
+        self.assertIn("--paths 'src/Tables/*.php'", r.hint)
+
+    def test_violation_despite_matching_triggers_points_at_an_obligation(self):
+        r = self.violation("src/**/*.php", files=["src/Tables/a.php"])
+        self.assertIn("matched", r.hint)
+        self.assertIn("obligation", r.hint)
+
+    def test_violation_outside_the_triggers_says_they_missed(self):
+        r = self.violation("lib/**/*.php", files=["src/Tables/a.php"])
+        self.assertIn("did not match", r.hint)
+        self.assertIn("--paths 'src/Tables/*.php'", r.hint)
+
+    def test_new_memory_has_no_hint_and_paths_widen_an_existing_one(self):
+        self.assertEqual(self.learn(memory="spaces", **dict(NEW, paths=["a/*.py"])).hint, "")
+        r = self.learn(memory="spaces", **dict(KW, paths=["b/*.py", "a/*.py"], commands=["make"]))
+        self.assertEqual(parse(r.memory.read_text())["triggers"], {"paths": ["a/*.py", "b/*.py"], "commands": ["make"]})
+        self.assertEqual(r.hint, "")  # the agent already fixed what the hint would ask for
+
     def test_links_must_resolve(self):
         with self.assertRaises(LearnRefused):
             self.learn(memory="spaces", **dict(NEW, body="**Why:** [[nope]]"))

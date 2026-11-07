@@ -44,8 +44,9 @@ class CompatTest(_Base):
         self.assertNotIn("bin", envs)
         self.assertIn("personal", envs)
 
-    def test_lint_is_clean(self):
-        self.assertEqual(lint(Store(self.root)), [])
+    def test_lint_only_flags_the_scope_written_in_the_description_alone(self):
+        self.assertEqual(lint(Store(self.root)),
+                         ["work/_global/pr-gate.md: description is scoped to repos but triggers.repos is empty"])
 
     def test_session_start_lists_all_three_indexes(self):
         payload = self.payload("session_start")

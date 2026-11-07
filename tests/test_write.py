@@ -26,6 +26,57 @@ class WriteTest(unittest.TestCase):
         self.folder = self.root / "acme/web"
         self.mem = self.folder / "m.md"
 
+    def test_add_triggers_merges_without_duplicates_and_keeps_other_lines(self):
+        self.assertTrue(write.add_triggers(self.mem, {"paths": ["*.py", "src/*.php"], "commands": ["pytest"]}))
+        data = parse(self.mem.read_text())
+        self.assertEqual(data["triggers"], {"paths": ["*.py", "src/*.php"], "commands": ["pytest"]})
+        self.assertIn("  paths: [*.py, src/*.php]\n  commands: [pytest]\n---\nbody\n", self.mem.read_text())
+        self.assertIn("  updated: 2020-01-01\n", self.mem.read_text())
+        self.assertTrue(write.add_triggers(self.mem, {"paths": ["*.py"]}))  # nothing new is still a success
+        self.assertEqual(parse(self.mem.read_text())["triggers"]["paths"], ["*.py", "src/*.php"])
+
+    def test_add_triggers_creates_the_section_and_keeps_crlf(self):
+        self.mem.write_bytes(MEM.replace("triggers:\n  paths: ['*.py']\n", "").replace("\n", "\r\n").encode())
+        self.assertTrue(write.add_triggers(self.mem, {"repos": ["web"]}))
+        raw = self.mem.read_bytes()
+        self.assertNotIn(b"\r\r", raw)
+        self.assertEqual(raw.count(b"\n"), raw.count(b"\r\n"))
+        self.assertEqual(parse(raw.decode())["triggers"], {"repos": ["web"]})
+
+    def test_add_triggers_refuses_what_it_cannot_edit_safely(self):
+        self.mem.write_text(MEM.replace("paths: ['*.py']", "paths: '*.py'"))
+        before = self.mem.read_bytes()
+        self.assertFalse(write.add_triggers(self.mem, {"paths": ["x"]}))  # scalar, not an inline list
+        self.assertEqual(self.mem.read_bytes(), before)
+        self.mem.write_text(MEM)
+        with self.assertRaises(write.Refused):
+            write.add_triggers(self.mem, {"commands": ["echo ghp_" + "a" * 36]})
+        self.assertEqual(self.mem.read_text(), MEM)
+
+    def test_move_into_metadata_hoists_misplaced_keys(self):
+        self.mem.write_text("---\nname: m\ndescription: d\nmetadata:\n  type: feedback\nauthor: claude-code\n"
+                            "updated: 2026-10-30\ntriggers:\n  paths: [a]\n---\nbody\n")
+        self.assertTrue(write.move_into_metadata(self.mem, ["author", "updated", "absent"]))
+        data = parse(self.mem.read_text())
+        self.assertEqual(data["metadata"], {"type": "feedback", "author": "claude-code", "updated": "2026-10-30"})
+        self.assertNotIn("author", data)
+        self.assertEqual(data["triggers"], {"paths": ["a"]})
+        self.assertTrue(self.mem.read_text().endswith("---\nbody\n"))
+
+    def test_move_into_metadata_creates_the_section_and_skips_what_is_already_there(self):
+        self.mem.write_text("---\nname: m\ndescription: d\nauthor: me\n---\nbody\n")
+        self.assertTrue(write.move_into_metadata(self.mem, ["author"]))
+        self.assertEqual(parse(self.mem.read_text())["metadata"], {"author": "me"})
+        before = self.mem.read_bytes()
+        self.assertTrue(write.move_into_metadata(self.mem, ["author"]))  # nothing left to move
+        self.assertEqual(self.mem.read_bytes(), before)
+
+    def test_move_into_metadata_leaves_a_clash_alone(self):
+        text = "---\nname: m\ndescription: d\nmetadata:\n  author: a\nauthor: b\n---\nbody\n"
+        self.mem.write_text(text)
+        self.assertFalse(write.move_into_metadata(self.mem, ["author"]))
+        self.assertEqual(self.mem.read_text(), text)
+
     def test_discard_only_the_created_file(self):
         p = self.folder / "edges"
         p.mkdir()
@@ -286,9 +337,9 @@ class WriteFixRound1Test(unittest.TestCase):
         """Every file-writing call in lrdmem/ sits in write.py, store.ensure_format or a known non-store writer."""
         allowed = {("store.py", "ensure_format"), ("config.py", "save"), ("session.py", "save"),
                    ("install.py", "_write"), ("cli.py", "_graph"), ("hooks/claude.py", "link_claude_memory"),
-                   ("consolidate.py", "lock")}
+                   ("consolidate.py", "lock"), ("usage.py", "record")}
         # device config, session state, harness configs, graph --output, Claude's auto-memory link,
-        # the consolidation lock in the private state dir: not store content
+        # the consolidation lock in the private state dir, the device-local recall log: not store content
         pkg = Path(__file__).parent.parent / "lrdmem"
         found = set()
         for path in sorted(pkg.rglob("*.py")):

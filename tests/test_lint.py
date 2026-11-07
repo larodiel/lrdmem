@@ -63,6 +63,34 @@ class LintTest(unittest.TestCase):
         del files["work/app/MEMORY.md"]
         self.has(files, "missing MEMORY.md")
 
+    def test_scope_prefix_in_description_needs_triggers_repos(self):
+        scoped = mem("s").replace("description: d", "description: 'Acme repos: only for plugins'")
+        files = clean(**{"work/_global/MEMORY.md": index("s"), "work/_global/s.md": scoped})
+        self.has(files, "work/_global/s.md: description is scoped to repos but triggers.repos is empty")
+        fixed = mem("s", extra="triggers:\n  repos: [app]\n").replace("description: d",
+                                                                      "description: 'Acme repos (common): x'")
+        self.assertEqual(self.run_lint(clean(**{"work/_global/MEMORY.md": index("s"), "work/_global/s.md": fixed})), [])
+        in_repo = clean(**{"work/app/a.md": scoped.replace("name: s", "name: a")})  # a repo folder is scoped already
+        self.assertEqual(self.run_lint(in_repo), [])
+
+    def test_triggers_repos_naming_no_repo_of_the_store(self):
+        bad = mem("s", extra="triggers:\n  repos: [plans, nope]\n")
+        self.has(clean(**{"work/_global/MEMORY.md": index("s"), "work/_global/s.md": bad}),
+                 "work/_global/s.md: triggers.repos names no repository in the store")
+        partly = mem("s", extra="triggers:\n  repos: [app, nope]\n")
+        self.assertEqual(self.run_lint(clean(**{"work/_global/MEMORY.md": index("s"), "work/_global/s.md": partly})), [])
+
+    def test_root_global_must_not_hold_repository_details(self):
+        leak = mem("g", body="**Why:** seen in app\n**How to apply:** h\n")
+        self.has(clean(**{"_global/g.md": leak}), "_global/g.md: root _global names the repository app")
+        ticket = mem("g", body="**Why:** PROJ-12\n**How to apply:** h\n")
+        self.has(clean(**{"_global/g.md": ticket}), "_global/g.md: root _global names the ticket PROJ-12")
+        exp = "---\nid: 2026-01-02-x\ndate: 2026-01-02\nkind: correction\nsource: chat\n---\nfixed in app\n"
+        self.has(clean(**{"_global/experiences/2026-01-02-x.md": exp}),
+                 "_global/experiences/2026-01-02-x.md: root _global names the repository app")
+        fine = mem("g", body="**Why:** SHA-256 and UTF-8, a webapp\n**How to apply:** h\n")
+        self.assertEqual(self.run_lint(clean(**{"_global/g.md": fine})), [])
+
     def test_link_to_other_repo_same_env_resolves(self):
         files = clean(**{"work/other/MEMORY.md": index("o"), "work/other/o.md": mem("o"),
                          "work/app/a.md": mem(body="**Why:** w\n**How to apply:** h [[o]]\n")})

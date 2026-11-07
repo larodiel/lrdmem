@@ -304,7 +304,8 @@ store only for an identical command at an identical path.
   project folder. Rename the checkout to keep them apart.
 - **Reserved names.** `contexts`, `experiences`, `edges`, `revisions` and `queue` can't be project names.
 - **Where `learn` writes.** `--scope repo` writes to the current project's folder, `--scope env` to
-  `<env>/_global/` (pass `--repos` to say which repos it applies to), `--scope global` to `_global/`.
+  `<env>/_global/` (pass `--repos` to say which repos it applies to), `--scope global` to `_global/` (refused when the text names this repository or a ticket id, or `--files` are given:
+  those facts belong in `--scope repo`).
 - **Don't move a project folder once it has memories.** Evidence and relations refer to store paths such as
   `work/shop-frontend/experiences/…`; moving the folder breaks them (`lrdmem lint` lists every broken ref).
 
@@ -400,7 +401,7 @@ options of any command.
 | Look up | `recall` · `associate` · `for` | what applies to a task, file or command, and why |
 | | `list` | the memories that apply here, an environment's, or all, with type, state and confidence |
 | | `find` · `show` · `why` | search, read a memory, see its history |
-| | `hot` · `stale` · `graph` · `lint` | repeated lessons, dead paths, the map, store checks |
+| | `hot` · `usage` · `migrate` · `stale` · `graph` · `lint` | repeated lessons, what hooks injected, dead paths, the map, store checks |
 | Lifecycle | `consolidate` | promote, contest, merge, and decide queued judgments |
 | | `revert` | undo one recorded change |
 | Obligations | `allow` · `check` | approve check commands, run them |
@@ -460,9 +461,13 @@ memory when it is new. A correction is active immediately.
 | `--files F...` | files involved |
 | `--kind obligation\|pattern\|fact` | the memory's kind; `obligation` can carry a check |
 | `--description`, `--body`, `--why`, `--how` | the new memory's text (required for a new memory) |
-| `--paths`, `--commands`, `--repos` | triggers: globs, command prefixes, repos (repeat or comma-separate; env scope needs `--repos`) |
+| `--paths`, `--commands`, `--repos` | triggers: globs, command prefixes, repos (repeat or comma-separate; env scope needs `--repos`). On an existing memory they are merged into its triggers |
 | `--new` | create it even when similar memories exist (otherwise learn refuses and lists them) |
 | `--env ENV` | the environment, when not inferable |
+
+A correction on a memory that already exists means the rule was broken. Without new triggers, learn prints a `hint:` on
+stderr saying why: the rule is index only (no file or command triggers), its triggers did not match the files, or it
+matched and was broken anyway (see `lrdmem hot`, and consider an obligation with a check).
 
 #### `lrdmem learn-pr`
 
@@ -567,6 +572,22 @@ number of revisions.
 `lrdmem hot [--min N]`: memories reinforced by at least N independent experiences (default 3), ranked by confidence
 times support. These are the rules that keep being broken: candidates for an obligation with a check.
 
+#### `lrdmem usage`
+
+`lrdmem usage [--days N] [--json]`: what the hooks injected in the last N days (default 30): sessions per repo,
+injections per memory with the last day, the memories whose file or command triggers never fired, and those with no
+triggers that live only in the session-start index. Hooks append to `recalls.jsonl` beside the config file; it is
+per-device, never in the store, and trims itself at 1 MB. Use it to retire or retrigger memories that never help.
+
+#### `lrdmem migrate`
+
+`lrdmem migrate [--env ENV] [--infer-triggers] [--apply]`: repairs memories written before the v2 model. It moves
+`type`, `kind`, `author`, `created` and `updated` written outside `metadata:` under it (what lint reports as "no
+metadata.author"), and with `--infer-triggers` adds `triggers.paths` from the repo-relative files and folders a
+memory names in backticks (read the dry run first; only to memories that have no file or command triggers and that hooks can inject). It
+also lists memories over 4000 characters, which it never edits. A dry run unless `--apply`; a header it cannot edit
+safely is left as it was.
+
 #### `lrdmem stale`
 
 Lists file paths in backticks that no longer exist: absolute ones (`~/…`, `/…`) in every memory, relative
@@ -580,7 +601,10 @@ interactive HTML page (default), JSON or Graphviz DOT, to stdout or a file.
 #### `lrdmem lint`
 
 `lrdmem lint [ENV]`: checks the store: frontmatter, slugs, `MEMORY.md` indexes, evidence and relation refs,
-secrets, cited paths, and experiences edited after their first commit. Exits 1 on problems.
+secrets, cited paths, and experiences edited after their first commit. It also checks scope: an environment-wide
+memory whose description starts with a scope such as `Acme repos:` needs `triggers.repos`, `triggers.repos` must name
+at least one repository folder of the store, and the root `_global/` (about the user) must not name a repository of
+the store or a ticket id. Exits 1 on problems.
 
 ### Lifecycle
 
@@ -636,7 +660,7 @@ memories, 1 experiences`, `refactor(memory): consolidate — merge 1, promote 2,
 
 `lrdmem hook <phase> [--agent claude|codex|opencode]`: what the plugins and installed hooks run. Reads the harness's
 JSON on stdin and answers in its format. Phases: `session-start` (pull where autopush is on; the `MEMORY.md`
-indexes in scope, lint problems, commands awaiting approval, pending decisions), `pre-tool` (memories for the file
+indexes in scope without the lines of memories whose `triggers.repos` leave this repo out, lint problems, commands awaiting approval, pending decisions), `pre-tool` (memories for the file
 or command), `post-tool` (post-edit checks), `prompt` (a reminder to record corrections), `stop` (stop checks,
 consolidation, autopush). Never fails the agent, except a stop check that blocks.
 

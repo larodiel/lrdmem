@@ -179,6 +179,16 @@ class ExperienceCliTest(_Base):
         self.assertEqual((code, out2), (0, out + " (existing)"))
         self.assertEqual(len(self.files()), 1)
 
+    def test_global_scope_refuses_repo_specifics(self):
+        for argv in (["--scope", "global", "--files", "a.py", "x"], ["--scope", "global", "fixed PROJ-12"],
+                     ["--scope", "global", "the web repo"]):
+            code, out, err = self.run_cli(["--kind", "error", "--agent", "a", *argv])
+            self.assertEqual((code, out), (1, ""), argv)
+            self.assertIn("--scope repo", err)
+        self.assertEqual(self.files(), [])
+        code, _, _ = self.run_cli(["--kind", "error", "--agent", "a", "--scope", "global", "plain user fact"])
+        self.assertEqual(code, 0)
+
     def test_text_never_touches_stdin(self):
         r, w = os.pipe()  # write end stays open: reading would block forever
         self.addCleanup(os.close, w)

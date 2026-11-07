@@ -70,7 +70,8 @@ merge N, promote N, contest N`, `revert(memory): <revision>`, `chore(memory): sy
 is new. A new memory needs `--description`, `--body`, `--why` and `--how` (written as the **Why:** and
 **How to apply:** lines lint expects), and takes its triggers from `--paths` (globs relative to the repo root),
 `--commands` (command prefixes) and `--repos`; each can be repeated or comma-separated. A memory in `<env>/_global/`
-is only injected in the repos its `--repos` names.
+is only injected in the repos its `--repos` names, and its line is left out of the session-start index in
+any other repo.
 
 ```
 lrdmem learn --scope repo --agent claude --memory php-tabs --mistake "indented with spaces" \

@@ -39,10 +39,10 @@ lrdmem learn --scope repo --agent claude --memory phpunit-data-provider \
   --paths "tests/**/*Test.php"
 ```
 
-Scopes: `--scope repo` (this repository), `--scope env` (every repository of the environment;
-always pass `--repos`), `--scope global` (about the user). Set `--paths`/`--commands` triggers so hooks show
-the rule at the right moment. `lrdmem learn-pr <url> --agent claude` records review
-comments from the repository's owners, members and collaborators.
+Scopes: `--scope repo` (this repository), `--scope env` (every repository of the environment; always pass
+`--repos`), `--scope global` (about the user; refused if it names this repository, a ticket id or files).
+`--paths`/`--commands` make hooks show the rule; learn prints a `hint:` when an existing rule's triggers missed.
+`lrdmem learn-pr <url> --agent claude` records review comments from the repository's owners, members and collaborators.
 
 ## Not registered yet: `lrdmem enroll`
 

@@ -5,15 +5,15 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from lrdmem import config, consolidate, experience, revision, write
+from lrdmem import config, consolidate, experience, revision, usage, write
 from lrdmem.model import Evidence
 from lrdmem.checks import CheckResult, pending, problem, run_checks
-from lrdmem.lint import lint, printable
+from lrdmem.lint import INDEX_LINE, lint, printable
 from lrdmem.recall import recall, render
 from lrdmem.session import Session
 from lrdmem.store import Store, store_root
 from lrdmem.sync import autopush_enabled, pull, sync, toplevel
-from lrdmem.triggers import CAVEAT
+from lrdmem.triggers import CAVEAT, strs
 
 PROMPT = "If this message corrects your work, record it: lrdmem learn --help."
 MAX_BLOCKS = 2
@@ -131,6 +131,22 @@ def _record(inp: HookInput, s: _Scope, result: CheckResult) -> None:
             continue  # a recording problem never breaks the hook
 
 
+def _index(folder: Path, repo: str, scoped: dict) -> tuple[str, int]:
+    """The folder's MEMORY.md without the lines of memories whose triggers.repos leave repo out, and how many
+    lines that hid. A line with no file behind it stays: lint reports it."""
+    index = folder / "MEMORY.md"
+    body = index.read_text(encoding="utf-8", errors="replace").strip() if index.is_file() else ""
+    keep, hidden = [], 0
+    for line in body.splitlines():
+        m = INDEX_LINE.match(line)
+        repos = scoped.get(folder / m.group(1)) if m else None
+        if repos and repo not in repos:
+            hidden += 1
+        else:
+            keep.append(line)
+    return "\n".join(keep), hidden
+
+
 def _session_start(inp: HookInput, s: _Scope) -> HookOutput:
     deadline = time.monotonic() + PULL_BUDGET
     for target in (s.env, "_global"):
@@ -144,10 +160,15 @@ def _session_start(inp: HookInput, s: _Scope) -> HookOutput:
              "file when its line is relevant to the task, and skip memories scoped to other repositories. "
              f"Paths are relative to {root}/. List them with `lrdmem list`, search with `lrdmem find TERM`; "
              f"record corrections with `lrdmem learn --help`. {CAVEAT}"]
+    scoped = {m.path: strs(m.triggers.get("repos")) for m in s.store.memories()}
+    listed = hidden_total = 0
     for folder in s.store.scope_for(s.env, s.repo):
-        index = folder / "MEMORY.md"
-        body = index.read_text(encoding="utf-8", errors="replace").strip() if index.is_file() else ""
-        parts.append(f"## {folder.relative_to(root).as_posix()}/MEMORY.md\n{body or '(empty)'}")
+        body, hidden = _index(folder, s.repo, scoped)
+        listed += sum(1 for l in body.splitlines() if INDEX_LINE.match(l))
+        hidden_total += hidden
+        note = f"\n({hidden} index line{'s' * (hidden != 1)} hidden: scoped to other repositories)" if hidden else ""
+        parts.append(f"## {folder.relative_to(root).as_posix()}/MEMORY.md\n{body or '(empty)'}{note}")
+    usage.record("start", session=inp.session_id or "", env=s.env, repo=s.repo, listed=listed, hidden=hidden_total)
     problems = lint(s.store, s.env)
     if problems:
         shown = "\n".join(f"- {p}" for p in problems[:LINT_SHOWN])
@@ -176,6 +197,7 @@ def _inject(inp: HookInput, s: _Scope) -> HookOutput:
         return HookOutput()
     session.injected |= {h.node.ref for h in picked}
     session.save()
+    usage.record("inject", session=inp.session_id or "", env=s.env, repo=s.repo, refs=[h.node.ref for h in picked])
     return HookOutput(render(picked, ", ".join(inp.paths) or inp.command or ""))
 
 

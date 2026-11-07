@@ -10,10 +10,11 @@ from pathlib import Path
 
 from lrdmem import write
 from lrdmem.frontmatter import parse
-from lrdmem.lint import KINDS, SOURCES, has_secret
+from lrdmem.lint import KINDS, SOURCES, TICKET, has_secret
 from lrdmem.model import today_utc, v01_memory_type
 from lrdmem.search import alike
-from lrdmem.store import AmbiguousRepo, Experience, Store, StoreFormatError
+from lrdmem.store import AmbiguousRepo, Experience, Store, StoreFormatError, resolve
+from lrdmem.triggers import glob_match, strs
 
 _SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 _LINK = re.compile(r"\[\[([^\]]+)\]\]")
@@ -40,6 +41,7 @@ class LearnResult:
     memory: Path
     created: bool
     duplicates: list[str] = field(default_factory=list)
+    hint: str = ""  # when a correction reinforces an existing rule: why it was broken and what would stop that
 
 
 def terms(text: str) -> set[str]:
@@ -64,6 +66,31 @@ def scope_folder(store: Store, cwd: Path, scope: str, env: str | None) -> tuple[
     return store.root / e / ("_global" if scope == "env" else repo), e
 
 
+def repo_specifics(store: Store, cwd: Path, env: str | None, text: str, files=()) -> str | None:
+    """Why `text` and `files` belong to a repository, not to the user's global scope (None when nothing does).
+
+    Repo-relative files, a ticket id, or the name of the repository cwd is in all tie the fact to that repository.
+    """
+    if files:
+        return "files name paths inside a repository"
+    if m := TICKET.search(text):
+        return f"it names the ticket {m.group()}"
+    try:
+        found = resolve(store, cwd, env)
+    except AmbiguousRepo:
+        found = None
+    if found and re.search(rf"(?<![\w-]){re.escape(found[1])}(?![\w-])", text, re.I):
+        return f"it names the repository {found[1]}"
+    return None
+
+
+def refuse_repo_specifics(store: Store, cwd: Path, env: str | None, text: str, files=()) -> None:
+    """Raise LearnRefused when a global-scope fact is about the repository cwd is in."""
+    if why := repo_specifics(store, cwd, env, text, files):
+        raise LearnRefused(f"--scope global is for facts about the user, but {why}: record it with --scope repo "
+                           "(or --scope env with --repos), or drop the repository details")
+
+
 def _check_text(store: Store, fields: dict[str, str], scope: str, env: str | None, slug: str) -> None:
     for name, text in fields.items():
         if has_secret(text):
@@ -84,6 +111,23 @@ def _duplicates(store: Store, env: str | None, slug: str, description: str) -> l
     mems = [m for m in store.memories() if m.env in (None, env)]
     docs = [(str(n), m.slug.replace("-", " ") + " " + m.description) for n, m in enumerate(mems)]
     return [mems[int(i)].slug for i in sorted(alike(docs, slug.replace("-", " ") + " " + description), key=int)]
+
+
+def _violation_hint(memory, files: list[str]) -> str:
+    """Why a rule that already existed was broken, and the cheapest change that makes hooks show it next time."""
+    paths, commands = strs(memory.triggers.get("paths")), strs(memory.triggers.get("commands"))
+    suggest = ""
+    if files:
+        first = Path(files[0])
+        suggest = f" (e.g. --paths '{first.parent.as_posix()}/*{first.suffix}')".replace("'./*", "'*")
+    if not paths and not commands:
+        return ("this rule existed but is index only (no file or command triggers), so it reached the agent only "
+                f"through the session-start index: add --paths or --commands{suggest} so hooks inject it before the "
+                "next edit")
+    if files and not any(glob_match(f, g) for f in files for g in paths):
+        return f"this rule's triggers did not match these files, so hooks never showed it: add --paths{suggest}"
+    return ("this rule's triggers matched and it was broken anyway: repeat offenders (`lrdmem hot`) are candidates "
+            "for an obligation with a check")
 
 
 def _touch(path: Path, today: str) -> None:
@@ -122,6 +166,9 @@ def learn(store: Store, cwd: Path, *, memory: str, mistake: str, correction: str
                   for i, v in enumerate(vals)}}
     if any(len(v.splitlines()) > 1 or "\n" in v or "\r" in v for v in oneline.values()):
         raise LearnRefused("agent, device, pr, description, files and triggers must be single-line")
+    if scope == "global" and source == "chat":  # a PR review is repo-bound by nature: learn-pr decides its scope
+        refuse_repo_specifics(store, cwd, env, "\n".join([mistake, correction, body or "", why or "", how or "",
+                                                           description or ""]), files)
     folder, vis_env = scope_folder(store, cwd, scope, env)
     path = folder / f"{memory}.md"
     exists = path.exists()
@@ -173,8 +220,15 @@ def learn(store: Store, cwd: Path, *, memory: str, mistake: str, correction: str
         created = bool(r.created)
         if created and kind:
             write.set_fields(path, {"kind": kind})
+        hint = ""
         if not created:
             _touch(path, today_utc())
-        return LearnResult(exp.path, path, created, dups)
+            widen = {k: [x for x in v if x.strip()] for k, v in (("paths", paths), ("commands", commands),
+                                                                  ("repos", repos)) if any(x.strip() for x in v)}
+            if widen:
+                write.add_triggers(path, widen)
+            elif node := store.node(path.relative_to(store.root).with_suffix("").as_posix()):
+                hint = _violation_hint(node, list(files))
+        return LearnResult(exp.path, path, created, dups, hint)
     except write.Refused as e:
         raise LearnRefused(str(e)) from None

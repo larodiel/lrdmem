@@ -133,6 +133,25 @@ class ClaudeHookTest(_Base):
         out = self.hook("session-start", self.payload("session_start"))
         self.assertEqual(json.loads(out), self.ctx("SessionStart", text))
 
+    def test_session_start_hides_index_lines_of_memories_scoped_to_other_repos(self):
+        scoped = STYLE.replace("triggers:\n", "triggers:\n  repos: [other]\n").replace("php-style", "other-only")
+        open_ = STYLE.replace("triggers:\n", "triggers:\n  repos: [app, other]\n").replace("php-style", "shared")
+        self.store({"work/_global/MEMORY.md": "- [Other](other-only.md) — x\n- [Shared](shared.md) — y\n"
+                                              "- [Plain](plain.md) — z\n- [Gone](gone.md) — w\n",
+                    "work/_global/other-only.md": scoped, "work/_global/shared.md": open_,
+                    "work/_global/plain.md": STYLE.replace("php-style", "plain")})
+        text = json.loads(self.hook("session-start", self.payload("session_start")))
+        text = text["hookSpecificOutput"]["additionalContext"]
+        self.assertNotIn("- [Other](other-only.md)", text)
+        self.assertIn("- [Shared](shared.md) — y", text)
+        self.assertIn("- [Gone](gone.md) — w", text)  # no file behind the line: keep it, lint reports it
+        self.assertIn("1 index line hidden: scoped to other repositories", text)
+
+    def test_session_start_without_scoped_memories_prints_no_hidden_note(self):
+        self.store()
+        text = json.loads(self.hook("session-start", self.payload("session_start")))
+        self.assertNotIn("hidden", text["hookSpecificOutput"]["additionalContext"])
+
     def test_context_from_a_terminal_prints_text_and_links_nothing(self):
         self.store()
 

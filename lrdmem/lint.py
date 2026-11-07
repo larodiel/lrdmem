@@ -9,6 +9,7 @@ from pathlib import Path
 from lrdmem import model
 from lrdmem.sync import _git, _GitError, nested_git, toplevel
 from lrdmem.frontmatter import split, unsupported
+from lrdmem.triggers import strs
 from lrdmem.store import (FORMAT_FILE, IGNORED, SUBFOLDERS, SUPPORTED_FORMAT, Edge, Experience, Memory, QueueItem,
                           Revision, Store, StoreFormatError)
 
@@ -16,6 +17,9 @@ TYPES = {"user", "feedback", "project", "reference"}
 KINDS = {"obligation", "pattern", "fact"}
 CHECK_ON = {"stop", "post-edit"}
 SOURCES = {"chat", "pr"}
+# a tracker id such as PROJ-12; common standards like UTF-8 or SHA-256 are not ids
+TICKET = re.compile(r"\b(?!(?:UTF|SHA|ISO|RFC|AES|RSA|CVE|PDF)-)[A-Z][A-Z0-9]{2,9}-\d+\b")
+SCOPE_PREFIX = re.compile(r"^[A-Za-z][\w ]{0,20}? repos\b[^:]{0,20}:")
 INDEX_LINE = re.compile(r"^- \[[^\]]+\]\(([a-z0-9-]+\.md)\) — \S")
 SECRET = re.compile(
     r"sk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9]{30,}|github_pat_\w{30,}"
@@ -132,6 +136,34 @@ def _index(store: Store, folder: Path, files: set[str]) -> list[str]:
     return problems
 
 
+def _repo_keys(store: Store) -> set[str]:
+    return {r for f in store.folders() if (r := store.scope_of(f)[1])}
+
+
+def _scope(m: Memory, store: Store) -> list[str]:
+    """A company-wide memory that says it is for some repos must list them, in repos the store knows."""
+    if m.env is None or m.repo is not None:
+        return []
+    repos = strs(m.triggers.get("repos"))
+    if not repos:
+        return ["description is scoped to repos but triggers.repos is empty"] if SCOPE_PREFIX.match(m.description) else []
+    if not set(repos) & _repo_keys(store):
+        return [f"triggers.repos names no repository in the store ({', '.join(repos)}): a typo, or "
+                "`lrdmem enroll` the repository"]
+    return []
+
+
+def _leaks(item, text: str, store: Store) -> list[str]:
+    """The root _global is about the user: no repository names and no ticket ids (a type: user memory may list his projects)."""
+    if item.env is not None:
+        return []
+    out = [f"root _global names the repository {r}" for r in sorted(_repo_keys(store))
+           if re.search(rf"(?<![\w-]){re.escape(r)}(?![\w-])", text, re.I)]
+    if m := TICKET.search(text):
+        out.append(f"root _global names the ticket {m.group()}")
+    return out
+
+
 def _memory(m: Memory, text: str, known: set[str], store: Store) -> list[str]:
     meta = m.data.get("metadata") if isinstance(m.data.get("metadata"), dict) else {}
     out = []
@@ -149,7 +181,7 @@ def _memory(m: Memory, text: str, known: set[str], store: Store) -> list[str]:
         out.append(f"metadata.state must be one of {list(model.STATES)}")
     out += [f"metadata.{k} is not YYYY-MM-DD" for k in ("valid_from", "valid_until", "created")
             if meta.get(k) is not None and not _is_date(meta[k])]
-    out += _evidence(store, m.data, m.env) + _computed(m.data, meta)
+    out += _evidence(store, m.data, m.env) + _computed(m.data, meta) + _scope(m, store) + ([] if m.type == "user" else _leaks(m, text, store))
     if not meta.get("author"):
         out.append("no metadata.author")
     if not _is_date(meta.get("updated")):
@@ -203,7 +235,7 @@ def _experience(x: Experience, text: str, known: set[str], store: Store) -> list
         out.append(f"kind must be one of {list(model.EXPERIENCE_KINDS)}")
     if x.source not in model.SOURCES:
         out.append(f"source must be one of {list(model.SOURCES)}")
-    return out
+    return out + _leaks(x, text, store)
 
 
 def _edge(e: Edge, text: str, known: set[str], store: Store) -> list[str]:
