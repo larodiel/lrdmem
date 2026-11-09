@@ -336,9 +336,9 @@ class WriteFixRound1Test(unittest.TestCase):
     def test_only_write_py_writes_store_files(self):
         """Every file-writing call in lrdmem/ sits in write.py, store.ensure_format or a known non-store writer."""
         allowed = {("store.py", "ensure_format"), ("config.py", "save"), ("session.py", "save"),
-                   ("install.py", "_write"), ("cli.py", "_graph"), ("hooks/claude.py", "link_claude_memory"),
+                   ("install.py", "_write"), ("cli.py", "_graph"), ("cli.py", "_visualize"), ("hooks/claude.py", "link_claude_memory"),
                    ("consolidate.py", "lock"), ("usage.py", "record")}
-        # device config, session state, harness configs, graph --output, Claude's auto-memory link,
+        # device config, session state, harness configs, graph --output, visualize's page, Claude's auto-memory link,
         # the consolidation lock in the private state dir, the device-local recall log: not store content
         pkg = Path(__file__).parent.parent / "lrdmem"
         found = set()

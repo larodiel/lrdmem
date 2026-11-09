@@ -5,6 +5,8 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
+import webbrowser
 from pathlib import Path
 
 from lrdmem import __version__, checks, config, consolidate, digest, evidence, experience, mcp, migrate, propose, recall, revision, update, usage, write
@@ -293,6 +295,22 @@ def _graph(store: Store, g: Graph, args) -> int:
         Path(args.output).write_text(text, encoding="utf-8")
     else:
         _out(text)
+    return 0
+
+
+def _visualize(store: Store, g: Graph, args) -> int:
+    page = to_html(g)
+    if args.output:
+        path = Path(args.output)
+        path.write_text(page, encoding="utf-8")
+    else:  # the page holds memory text: mkstemp makes it private (0600)
+        fd, name = tempfile.mkstemp(prefix="lrdmem-", suffix=".html")
+        path = Path(name)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(page)
+    if not args.no_open:
+        webbrowser.open(path.as_uri())  # False on a headless machine; the path is printed either way
+    _out(str(path))
     return 0
 
 
@@ -694,6 +712,10 @@ def _main(argv: list[str] | None) -> int:
     p.set_defaults(fn=_graph)
     p.add_argument("--format", choices=["html", "json", "dot"], default="html")
     p.add_argument("-o", "--output")
+    p = sub.add_parser("visualize", help="open the memory store as an interactive 3D map in the browser")
+    p.set_defaults(fn=_visualize)
+    p.add_argument("-o", "--output")
+    p.add_argument("--no-open", action="store_true", help="write the page without opening the browser")
     p = sub.add_parser("associate", help="list memories associated with a text, file or command, with signals")
     p.set_defaults(fn=_associate)
     p.add_argument("query", nargs="?", default="")

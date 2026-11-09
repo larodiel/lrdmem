@@ -54,6 +54,21 @@ class ExportTest(unittest.TestCase):
         g = self._graph({"work/app/a.md": _mem("a"), "work/app/contexts/2026-01-01-c.md": c})
         self.assertIn('label="say \\"hi\\" \\\\ x"', to_dot(g))
 
+    def test_memory_nodes_carry_their_description(self):
+        d = to_json(self._graph({"work/app/a.md": _mem("a")}))
+        self.assertEqual(d["nodes"][0]["description"], "about a")
+
+    def test_html_is_an_interactive_3d_page(self):
+        html = to_html(self._graph({"work/app/a.md": _mem("a")}))
+        for part in ('<canvas id="c"', 'id="q"', 'id="info"', "devicePixelRatio", "wheel", "pointerdown"):
+            self.assertIn(part, html)
+
+    def test_html_styles_every_model_type_state_and_relation(self):
+        from lrdmem.model import EDGE_TYPES, MEMORY_TYPES, STATES
+        html = to_html(self._graph({"work/app/a.md": _mem("a")}))
+        for name in MEMORY_TYPES + EDGE_TYPES + tuple(s for s in STATES if s != "active"):
+            self.assertIn(name, html, f"the map does not draw {name}")
+
     def test_html_self_contained_and_safe(self):
         evil = "</script><img src=x onerror=alert(1)>"
         ctx = _ctx("c", "2026-01-01", ["a"]).replace("first line of c", evil)
