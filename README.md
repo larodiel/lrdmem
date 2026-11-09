@@ -94,6 +94,13 @@ flowchart LR
 - **Sync your way.** `lrdmem sync` when you want, or autopush per device and per environment.
 - **Zero dependencies.** Python 3.11+ standard library only. Hooks answer in about 100 ms.
 
+### See it
+
+![lrdmem visualize: a 3D map of the memory store, rotating, searching and following links](site/demo.gif)
+
+`lrdmem visualize` opens your whole store as a 3D graph in the browser: colour by environment, shape by memory type,
+size by confidence, a different line for every kind of relation. The demo uses an invented store, not real memories.
+
 ## Install
 
 ### Ask your model to install it
@@ -628,7 +635,19 @@ ones (`src/Foo.php`) only in the current repo's own memories. Exits 1 when it fi
 #### `lrdmem graph`
 
 `lrdmem graph [--format html|json|dot] [-o/--output FILE]`: exports memories, experiences and typed relations as an
-interactive HTML page (default), JSON or Graphviz DOT, to stdout or a file.
+interactive 3D HTML page (default), JSON or Graphviz DOT, to stdout or a file.
+
+#### `lrdmem visualize`
+
+`lrdmem visualize [-o/--output FILE] [--no-open]`: shows the whole store as a 3D map you can rotate and zoom. Each memory is a
+node: colour is its environment, shape its memory type (circle semantic, square procedural, diamond episodic, triangle
+prospective, hexagon hypothesis, star metacognitive), size its confidence and use. Dashed means candidate, an amber rim
+contested, hollow superseded or obsolete. Experiences are small grey dots. Links, `supersedes` and typed relations are
+the lines between them, one colour per kind, dashed while proposed; memories with no relation sit on the outer shell.
+A legend on the page lists what your store actually contains. Click a node to read its description and jump to
+its neighbours, or type in the search box to light up matches. It writes the page, opens it in your
+browser and prints the path: a private temporary file by default, FILE with `-o`; `--no-open` skips the browser. The page is one offline HTML file: it loads
+nothing from the network. It is the same page `lrdmem graph` produces.
 
 #### `lrdmem lint`
 

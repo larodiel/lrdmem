@@ -18,7 +18,8 @@ lrdmem memory propose --agent me < payload.json          # validated candidates 
 lrdmem feedback REF useful|incorrect|irrelevant           # signal on a recalled memory
 lrdmem consolidate [--queue | --resolve ITEM DECISION]    # automatic consolidation and the judgment queue
 lrdmem revert REVISION                                    # undo one recorded change
-lrdmem lint | graph --format html|json|dot -o OUT         # check and visualise the store
+lrdmem lint | graph --format html|json|dot -o OUT         # check and export the store
+lrdmem visualize                                          # open the store as a 3D map
 lrdmem migrate [--infer-triggers] [--apply] [--env ENV]    # repair legacy memories (dry run unless --apply)
 lrdmem enroll [--env ENV] | config enroll PATH ENV        # register a repo, or a path whose repos enrol on first use
 lrdmem mcp [--cwd DIR]                                    # read-only MCP server on stdio for apps without hooks
